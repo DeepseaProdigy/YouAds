@@ -101,6 +101,8 @@ export type AdSessionRecord = {
   prompt: string;
   /** Final expanded Orbis transition prompt (~10–15s). */
   transition_prompt: string;
+  /** ID of the server-owned Reactor/Orbis stream, when started. */
+  orbis_stream_id?: string;
   status: "active" | "finished" | "failed";
   started_at: number;
 };
@@ -141,6 +143,12 @@ export type TransitionAdResponse = {
 
 export type FinishAdResponse = {
   ok: true;
+};
+
+export type OrbisAdStreamResponse = {
+  stream_id: string;
+  status: string;
+  frames_url: string;
 };
 
 /** @deprecated alias while callers migrate */

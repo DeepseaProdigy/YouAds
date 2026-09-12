@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/v1/health")
+async def health() -> dict[str, bool]:
+    """Safe process-level configuration check for local orchestration."""
+    return {
+        "ok": True,
+        "reactor_key_configured": bool(
+            os.environ.get("REACTOR_API_KEY") or os.environ.get("ORBIS_API_KEY")
+        ),
+    }
 
 
 def response(stream_id: str, status: str) -> AdStreamResponse:

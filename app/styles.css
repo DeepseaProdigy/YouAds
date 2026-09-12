@@ -232,7 +232,8 @@ button:disabled {
 .yt-host,
 .ad-overlay,
 .ad-player-layer,
-.ad-overlay .player {
+.ad-overlay .player,
+.orbis-relay-player {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -265,6 +266,12 @@ button:disabled {
 
 .ad-player-layer .player {
   border-radius: 0;
+}
+
+.orbis-relay-player {
+  display: block;
+  object-fit: contain;
+  background: #000;
 }
 
 .ad-player-layer .status {

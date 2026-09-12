@@ -5,6 +5,7 @@ import {
   getSession,
   updateSession,
 } from "@/lib/ads/store";
+import { stopSessionOrbisStream } from "@/lib/ads/orbis-service";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -23,6 +24,9 @@ export async function POST(
     );
   }
 
+  // Finish is a safety net as well as an audit update: a browser can unload
+  // before its explicit /orbis/stop call reaches us.
+  await stopSessionOrbisStream(id).catch(() => undefined);
   await deleteResumeFrame(session.resume_frame_path);
   updateSession(id, {
     status: "finished",

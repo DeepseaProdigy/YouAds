@@ -1,6 +1,7 @@
 import { AD_SECONDS } from "@/lib/ads/constants";
 import type {
   FinishAdResponse,
+  OrbisAdStreamResponse,
   StartAdRequest,
   StartAdResponse,
   TransitionAdResponse,
@@ -81,6 +82,37 @@ export async function finishAdSession(
     },
   );
   return readJson<FinishAdResponse>(response);
+}
+
+export async function startOrbisAdStream(
+  adSessionId: string,
+): Promise<OrbisAdStreamResponse> {
+  const response = await fetch(
+    `/api/ads/${encodeURIComponent(adSessionId)}/orbis/start`,
+    { method: "POST" },
+  );
+  return readJson<OrbisAdStreamResponse>(response);
+}
+
+export async function steerOrbisAdStream(
+  adSessionId: string,
+): Promise<OrbisAdStreamResponse> {
+  const response = await fetch(
+    `/api/ads/${encodeURIComponent(adSessionId)}/orbis/transition`,
+    { method: "POST" },
+  );
+  return readJson<OrbisAdStreamResponse>(response);
+}
+
+export async function stopOrbisAdStream(
+  adSessionId: string,
+  options?: { keepalive?: boolean },
+): Promise<void> {
+  const response = await fetch(
+    `/api/ads/${encodeURIComponent(adSessionId)}/orbis/stop`,
+    { method: "POST", keepalive: options?.keepalive ?? false },
+  );
+  await readJson<{ ok: true }>(response);
 }
 
 export async function blobToBase64(blob: Blob): Promise<string> {
