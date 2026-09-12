@@ -3,6 +3,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from reactor_sdk.errors import RateLimitedError
 
 from .models import AdStreamResponse, StartAdStreamRequest, SteerAdStreamRequest
 from .stream_manager import AdStreamManager, OrbisStreamError
@@ -17,6 +19,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Orbis Ad Tool", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def response(stream_id: str, status: str) -> AdStreamResponse:
@@ -28,8 +37,16 @@ async def start_ad_stream_endpoint(request: StartAdStreamRequest) -> AdStreamRes
     try:
         stream = await streams.start(request.ad_prompt, request.resume_frame_base64)
         return response(stream.stream_id, stream.status)
+    except RateLimitedError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="Orbis has no available generation capacity right now. Please try again shortly.",
+            headers={"Retry-After": "15"},
+        ) from error
     except OrbisStreamError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Could not start Orbis: {error}") from error
 
 
 @app.post("/v1/ad-streams/{stream_id}/transition", response_model=AdStreamResponse)

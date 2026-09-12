@@ -5,16 +5,32 @@ import base64
 import inspect
 import io
 import os
+import ssl
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from PIL import Image
+import certifi
 from reactor_sdk import Reactor, ReactorStatus
 
 
 class OrbisStreamError(RuntimeError):
     pass
+
+
+def configure_tls_trust() -> None:
+    """Use Certifi's CA bundle for the SDK's urllib token exchange.
+
+    The Python Reactor SDK mints its JWT with urllib. Some macOS Python.org
+    installations do not have system certificate roots configured, which makes
+    that HTTPS call fail before an Orbis session can start.
+    """
+    context = ssl.create_default_context(cafile=certifi.where())
+    urllib.request.install_opener(
+        urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
+    )
 
 
 @dataclass
@@ -34,6 +50,7 @@ class AdStream:
         loop = asyncio.get_running_loop()
         self.started = loop.create_future()
         try:
+            configure_tls_trust()
             api_key = os.environ.get("REACTOR_API_KEY") or os.environ.get("ORBIS_API_KEY")
             if not api_key:
                 raise OrbisStreamError("Set REACTOR_API_KEY or ORBIS_API_KEY")

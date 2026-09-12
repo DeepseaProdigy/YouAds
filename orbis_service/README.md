@@ -5,7 +5,8 @@ Run the service:
 ```bash
 cd orbis_service
 source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
+# Limits reload watching to source files; do not watch .venv.
+python -m uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
 Set `REACTOR_API_KEY` (or the existing `ORBIS_API_KEY`) in the service shell.
