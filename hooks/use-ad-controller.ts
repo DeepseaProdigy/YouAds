@@ -280,13 +280,13 @@ export function useAdController({
     if (warmedRef.current) return;
     if (orbis.status !== "disconnected") return;
     warmedRef.current = true;
-    warmTimerRef.current = window.setTimeout(() => {
+    warmTimerRef.current = setTimeout(() => {
       warmTimerRef.current = null;
       connectOnce();
     }, 250);
     return () => {
       if (warmTimerRef.current !== null) {
-        window.clearTimeout(warmTimerRef.current);
+        clearTimeout(warmTimerRef.current);
         warmTimerRef.current = null;
       }
     };
@@ -299,7 +299,7 @@ export function useAdController({
     // Cancel the pending auto-warm connect so a manual click can't race it
     // into opening a second session on the same key.
     if (warmTimerRef.current !== null) {
-      window.clearTimeout(warmTimerRef.current);
+      clearTimeout(warmTimerRef.current);
       warmTimerRef.current = null;
     }
     connectOnce();
