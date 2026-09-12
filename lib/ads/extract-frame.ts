@@ -41,12 +41,32 @@ function run(
 }
 
 async function resolveYtDlp(): Promise<Cmd> {
+  // 1) Binary shipped by `youtube-dl-exec` on npm install
+  const bundled = path.join(
+    process.cwd(),
+    "node_modules",
+    "youtube-dl-exec",
+    "bin",
+    "yt-dlp",
+  );
+  try {
+    const check = await run(bundled, ["--version"], 8_000);
+    if (check.code === 0) {
+      return { bin: bundled, prefixArgs: [] };
+    }
+  } catch {
+    // fall through
+  }
+
+  // 2) System yt-dlp (brew / PATH)
   try {
     const check = await run("yt-dlp", ["--version"], 8_000);
     if (check.code === 0) return { bin: "yt-dlp", prefixArgs: [] };
   } catch {
     // fall through
   }
+
+  // 3) pip module
   const check = await run(
     "python3",
     ["-m", "yt_dlp", "--version"],
@@ -55,7 +75,29 @@ async function resolveYtDlp(): Promise<Cmd> {
   if (check.code === 0) {
     return { bin: "python3", prefixArgs: ["-m", "yt_dlp"] };
   }
-  throw new Error("yt-dlp is not installed");
+  throw new Error(
+    "yt-dlp missing — run npm install (youtube-dl-exec) or pip/brew install yt-dlp",
+  );
+}
+
+async function resolveFfmpeg(): Promise<string> {
+  const bundled = path.join(
+    process.cwd(),
+    "node_modules",
+    "ffmpeg-static",
+    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+  );
+  try {
+    const check = await run(bundled, ["-version"], 5_000);
+    if (check.code === 0) return bundled;
+  } catch {
+    // fall through
+  }
+  const check = await run("ffmpeg", ["-version"], 5_000);
+  if (check.code === 0) return "ffmpeg";
+  throw new Error(
+    "ffmpeg missing — run npm install (ffmpeg-static) or brew install ffmpeg",
+  );
 }
 
 async function getStreamUrl(
@@ -103,8 +145,7 @@ export async function extractYoutubeFrame(input: {
 
   try {
     const ytDlp = await resolveYtDlp();
-    const ff = await run("ffmpeg", ["-version"], 5_000);
-    if (ff.code !== 0) throw new Error("ffmpeg is not installed");
+    const ffmpegBin = await resolveFfmpeg();
 
     const streamUrl = await getStreamUrl(ytDlp, videoUrl);
 
@@ -124,7 +165,7 @@ export async function extractYoutubeFrame(input: {
       "-y",
       outPath,
     ];
-    const ffmpegResult = await run("ffmpeg", ffmpegArgs, 90_000);
+    const ffmpegResult = await run(ffmpegBin, ffmpegArgs, 90_000);
     if (ffmpegResult.code !== 0) {
       throw new Error(
         ffmpegResult.stderr.trim() ||
