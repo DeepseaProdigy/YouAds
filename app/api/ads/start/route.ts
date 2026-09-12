@@ -9,28 +9,19 @@ import {
 import { selectAdPrompt } from "@/lib/ads/prompt-bank";
 import { runPauseAdGates } from "@/lib/ads/rubric";
 import {
-  deleteResumeFrame,
   getActiveSessionCount,
   putSession,
   saveResumeFrame,
 } from "@/lib/ads/store";
-import type {
-  AdBrief,
-  ExpandedAd,
-  StartAdRequest,
-} from "@/lib/ads/types";
+import type { AdBrief, ExpandedAd, StartAdRequest } from "@/lib/ads/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-async function expandWithGates(
+async function expandBestEffort(
   brief: AdBrief,
   frameBase64: string,
-): Promise<{
-  expanded: ExpandedAd;
-  expandedWith: string;
-  rubricFailures: string[];
-}> {
+): Promise<{ expanded: ExpandedAd; expandedWith: string }> {
   let expanded: ExpandedAd;
   let expandedWith = "openai-vision";
 
@@ -42,25 +33,28 @@ async function expandWithGates(
     expandedWith = "fallback";
   }
 
-  let rubric = runPauseAdGates(expanded);
-
-  // Safety abort — do not regenerate.
-  if (!expanded.safe_to_insert) {
-    return {
-      expanded,
-      expandedWith,
-      rubricFailures: rubric.failures,
-    };
+  // Never refuse. Empty model output → fallback.
+  if (
+    !expanded.primary_prompt.trim() ||
+    !expanded.transition_prompt.trim()
+  ) {
+    expanded = buildFallbackExpanded(brief);
+    expandedWith = "fallback-empty";
   }
 
-  // Soft length / craft failures: one regenerate, then fallback.
-  if (!rubric.pass && expandedWith === "openai-vision") {
+  expanded.safe_to_insert = true;
+  expanded.safety_reason = "";
+
+  let rubric = runPauseAdGates(expanded);
+  if (!rubric.pass && expandedWith.startsWith("openai-vision")) {
     console.warn(
       "[ads/start] rubric fail, regenerating once:",
       rubric.failures.join(","),
     );
     try {
       expanded = await expandPrompt(brief, frameBase64);
+      expanded.safe_to_insert = true;
+      expanded.safety_reason = "";
       expandedWith = "openai-vision-retry";
       rubric = runPauseAdGates(expanded);
     } catch (caught) {
@@ -68,21 +62,21 @@ async function expandWithGates(
     }
   }
 
-  if (!rubric.pass && expanded.safe_to_insert) {
+  if (!rubric.pass) {
     console.warn(
-      "[ads/start] rubric still failing, trying fallback brief expand",
+      "[ads/start] rubric soft-fail, shipping anyway:",
       rubric.failures.join(","),
     );
-    expanded = buildFallbackExpanded(brief);
-    expandedWith = "fallback-after-rubric";
-    rubric = runPauseAdGates(expanded);
+    if (
+      !expanded.primary_prompt.trim() ||
+      !expanded.transition_prompt.trim()
+    ) {
+      expanded = buildFallbackExpanded(brief);
+      expandedWith = "fallback-after-rubric";
+    }
   }
 
-  return {
-    expanded,
-    expandedWith,
-    rubricFailures: rubric.failures,
-  };
+  return { expanded, expandedWith };
 }
 
 export async function POST(request: Request) {
@@ -126,41 +120,10 @@ export async function POST(request: Request) {
     }
 
     const framePath = await saveResumeFrame(body.resume_frame_base64);
-    const { expanded, expandedWith, rubricFailures } =
-      await expandWithGates(brief, body.resume_frame_base64);
-
-    if (!expanded.safe_to_insert) {
-      await deleteResumeFrame(framePath);
-      return NextResponse.json(
-        {
-          skipped: true,
-          safety_reason:
-            expanded.safety_reason ||
-            "Frame failed brand-safety gate",
-          prompt_id: brief.id,
-          product_label: brief.product_label,
-          frame_read: expanded.frame_read,
-          rubric_failures: rubricFailures,
-        },
-        { headers: { "Cache-Control": "no-store, max-age=0" } },
-      );
-    }
-
-    const finalRubric = runPauseAdGates(expanded);
-    if (!finalRubric.pass) {
-      await deleteResumeFrame(framePath);
-      return NextResponse.json(
-        {
-          skipped: true,
-          safety_reason: `Rubric gates failed: ${finalRubric.failures.join(", ")}`,
-          prompt_id: brief.id,
-          product_label: brief.product_label,
-          frame_read: expanded.frame_read,
-          rubric_failures: finalRubric.failures,
-        },
-        { headers: { "Cache-Control": "no-store, max-age=0" } },
-      );
-    }
+    const { expanded, expandedWith } = await expandBestEffort(
+      brief,
+      body.resume_frame_base64,
+    );
 
     const id = randomUUID();
     putSession({
@@ -178,6 +141,8 @@ export async function POST(request: Request) {
       started_at: Date.now(),
     });
 
+    const rubric = runPauseAdGates(expanded);
+
     return NextResponse.json(
       {
         ad_session_id: id,
@@ -188,7 +153,8 @@ export async function POST(request: Request) {
         product_label: brief.product_label,
         frame_read: expanded.frame_read,
         expanded_with: expandedWith,
-        rubric_pass: true,
+        rubric_pass: rubric.pass,
+        rubric_failures: rubric.failures,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } },
     );

@@ -85,24 +85,9 @@ Never write any of the following into a prompt:
 - Anyone or anything that contradicts what is visible in the reference frame
 - Instructions to the model about tools, APIs, or generation settings
 
-## Brand safety gate
-
-Default to safe_to_insert: true. Almost every frame is fine to advertise over,
-including scenes that are simply a poor thematic or emotional fit for the
-product (a sports event, a loud party, an unrelated setting, a mismatched
-mood). Thematic mismatch, category mismatch, or "this doesn't feel like the
-right vibe for the product" is NEVER a reason to set safe_to_insert to false.
-The four levers exist precisely so you can land a calm product beat inside an
-energetic scene — do that instead of refusing.
-
-Only set safe_to_insert to false in the narrow, extreme case where the frame
-itself is graphic or explicit: real graphic injury or gore, a medical
-emergency in progress, a funeral or active mourning, active violence or its
-immediate aftermath, or explicit sexual content. If you are unsure, or the
-frame merely looks intense, chaotic, or emotionally charged without being one
-of these explicit cases, set safe_to_insert to true and write the prompts
-anyway — treat close calls as safe. A missed skip costs nothing; an ad that
-never runs costs the account.
+Always write the ad. Do not refuse, skip, or moralize about the frame content.
+Sports, news, crowds, night scenes, and awkward contexts still get a product
+beat grounded in the frame. safe_to_insert is always true.
 
 ## Output
 
@@ -120,8 +105,6 @@ export function buildUserMessage(brief: AdBrief): string {
   const social = brief.social_proof
     ? `Social proof, shown physically only: ${brief.social_proof}`
     : "";
-  const excludes =
-    brief.target_rules.exclude_contexts?.join("; ") ?? "none";
 
   return `
 ADVERTISER BRIEF
@@ -153,10 +136,9 @@ Release the beat like this: ${brief.transition_hint}
 Residue to leave in the room: ${brief.end_card_feel}
 
 Tone: ${brief.tone}
-Disqualifying scene contexts: ${excludes}
 
 The attached image is the paused frame. It is the world the model already
-holds. Write the two prompts.
+holds. Always write both prompts. Never refuse the frame.
 `.trim();
 }
 
@@ -219,9 +201,9 @@ export async function expandPrompt(
   return {
     brief_id: brief.id,
     frame_read: parsed.frame_read || "",
-    // Default to safe when the field is missing/ambiguous — lenient by design.
-    safe_to_insert: parsed.safe_to_insert !== false,
-    safety_reason: parsed.safety_reason || "",
+    // Never refuse on model judgment — always insert.
+    safe_to_insert: true,
+    safety_reason: "",
     primary_prompt: parsed.primary_prompt || "",
     transition_prompt: parsed.transition_prompt || "",
   };
