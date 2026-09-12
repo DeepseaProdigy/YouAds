@@ -1,5 +1,9 @@
-import { AdStreamConsole } from "@/components/ad-stream-console";
+import { WatchShell } from "@/components/watch/watch-shell";
 
 export default function Home() {
-  return <main><AdStreamConsole /></main>;
+  return (
+    <main className="watch-main">
+      <WatchShell />
+    </main>
+  );
 }

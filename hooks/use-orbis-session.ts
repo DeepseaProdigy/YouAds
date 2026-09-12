@@ -240,11 +240,29 @@ export function useOrbisSession(onDisconnected: () => void) {
     await runAction(() => startGeneration(editedImage, groundedPrompt));
   };
 
+  const startAdRun = async (
+    startImage: File | null,
+    runPrompt: string,
+  ) => {
+    setImage(startImage);
+    setPrompt(runPrompt);
+    await runAction(() => startGeneration(startImage, runPrompt));
+  };
+
   const steer = () =>
     runAction(async () => {
       if (!prompt.trim()) throw new Error("Enter a prompt before steering.");
       await sendCommand("set_prompt", { prompt: prompt.trim() });
     });
+
+  const steerWithPrompt = async (nextPrompt: string) => {
+    const trimmed = nextPrompt.trim();
+    if (!trimmed) throw new Error("Enter a prompt before steering.");
+    setPrompt(trimmed);
+    await runAction(async () => {
+      await sendCommand("set_prompt", { prompt: trimmed });
+    });
+  };
 
   const disconnectSession = async () => {
     disconnecting.current = true;
@@ -284,8 +302,10 @@ export function useOrbisSession(onDisconnected: () => void) {
     setResolution,
     startRun,
     startFromNanoOutput,
+    startAdRun,
     setNanoBusy,
     steer,
+    steerWithPrompt,
     pause: () => runAction(() => sendCommand("pause", {})),
     resume: () => runAction(() => sendCommand("resume", {})),
     reset: () => runAction(() => sendCommand("reset", {})),

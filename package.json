@@ -13,6 +13,7 @@
     "@reactor-team/js-sdk": "^3.0.2",
     "hls.js": "^1.6.13",
     "next": "16.3.5",
+    "openai": "^7.15.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "zustand": "^5.0.11"
