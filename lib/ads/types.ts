@@ -112,6 +112,12 @@ export type StartAdRequest = {
   /** Required product brief id from the catalog. */
   brief_id?: string;
   targeting_context?: TargetingContext;
+  /**
+   * Optional hand-written Orbis prompt. When present, it replaces the
+   * AI-expanded primary prompt entirely; the transition prompt still comes
+   * from the brief's fallback so playback can dissolve back cleanly.
+   */
+  prompt_override?: string;
 };
 
 export type StartAdResponse = {

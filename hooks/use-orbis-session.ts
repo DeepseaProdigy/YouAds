@@ -1,13 +1,22 @@
 "use client";
 
 import { useReactor, useReactorMessage } from "@reactor-team/js-sdk";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   DOCUMENTED_RESOLUTIONS,
   type OrbisMessage,
   unwrapOrbisMessage,
 } from "@/lib/orbis";
+import {
+  acquireOrbisTabLock,
+  isQuotaExceededError,
+  otherTabOwnsOrbisLock,
+  refreshOrbisTabLock,
+  releaseOrbisTabLock,
+  sleep,
+  startOrbisTabLockHeartbeat,
+} from "@/lib/orbis-session-lock";
 
 export function useOrbisSession(onDisconnected: () => void) {
   const { status, connect, disconnect, sendCommand, uploadFile } = useReactor(
@@ -19,6 +28,19 @@ export function useOrbisSession(onDisconnected: () => void) {
       uploadFile: state.uploadFile,
     }),
   );
+
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  // A plain function call, rather than a bare `statusRef.current` read,
+  // keeps TS's control-flow narrowing from (incorrectly) treating the ref's
+  // value as fixed across `await` points where React can update it.
+  const getStatus = useCallback(() => statusRef.current, []);
+
+  const connectRef = useRef(connect);
+  connectRef.current = connect;
+
+  const disconnectRef = useRef(disconnect);
+  disconnectRef.current = disconnect;
 
   const [prompt, setPrompt] = useState("");
   const [image, setImage] = useState<File | null>(null);
@@ -34,6 +56,9 @@ export function useOrbisSession(onDisconnected: () => void) {
   const [imageStatus, setImageStatus] = useState("");
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [retryTotal, setRetryTotal] = useState(0);
+  const cancelConnectRef = useRef(false);
 
   const previousStatus = useRef(status);
   const disconnecting = useRef(false);
@@ -49,6 +74,7 @@ export function useOrbisSession(onDisconnected: () => void) {
       status === "disconnected" &&
       previousStatus.current !== "disconnected"
     ) {
+      releaseOrbisTabLock();
       onDisconnected();
       setRunStarted(false);
       setPaused(false);
@@ -56,6 +82,151 @@ export function useOrbisSession(onDisconnected: () => void) {
     }
     previousStatus.current = status;
   }, [onDisconnected, status]);
+
+  useEffect(() => {
+    if (!connected) return;
+    return startOrbisTabLockHeartbeat();
+  }, [connected]);
+
+  const forceDisconnect = useCallback(async () => {
+    disconnecting.current = true;
+    setRunStarted(false);
+    setPaused(false);
+
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    try {
+      // Never recoverable — always terminate the server session immediately.
+      await disconnectRef.current(false);
+    } catch {
+      // disconnect() is safe to call multiple times.
+    } finally {
+      disconnecting.current = false;
+      releaseOrbisTabLock();
+    }
+  }, []);
+
+  const waitForDisconnected = useCallback(
+    async (timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (getStatus() === "disconnected") return;
+        await sleep(100);
+      }
+      if (getStatus() !== "disconnected") {
+        await forceDisconnect();
+      }
+    },
+    [forceDisconnect, getStatus],
+  );
+
+  const connectWithRetry = useCallback(async () => {
+    if (otherTabOwnsOrbisLock()) {
+      throw new Error(
+        "Another browser tab is using Orbis on this machine. Close it or " +
+          "press Disconnect there, then try again.",
+      );
+    }
+
+    if (getStatus() === "ready") return;
+
+    if (getStatus() === "connecting" || getStatus() === "waiting") {
+      await waitForDisconnected(15_000);
+      if (getStatus() === "ready") return;
+    }
+
+    if (getStatus() !== "disconnected") {
+      await forceDisconnect();
+      await waitForDisconnected();
+    }
+
+    if (!acquireOrbisTabLock()) {
+      throw new Error(
+        "Another browser tab is using Orbis on this machine. Close it or " +
+          "press Disconnect there, then try again.",
+      );
+    }
+
+    // A "slot full" error usually means a *stale* session (a crashed tab, a
+    // refresh that didn't finish closing its socket, a second page like
+    // /agent-lab) is still held open on the Reactor server under this key.
+    // The server only frees that slot after its own timeout, which can be
+    // well past 15s, so keep retrying for a couple of minutes instead of
+    // giving up quickly and forcing the user to keep clicking Connect.
+    const backoffMs = [
+      0, 2_000, 4_000, 8_000, 10_000, 10_000, 15_000, 15_000, 15_000, 15_000,
+      15_000, 15_000,
+    ];
+    let lastError = "";
+    cancelConnectRef.current = false;
+    setRetryTotal(backoffMs.length);
+
+    try {
+      for (let i = 0; i < backoffMs.length; i += 1) {
+        if (cancelConnectRef.current) {
+          throw new Error("Connect cancelled.");
+        }
+        const delayMs = backoffMs[i];
+        setRetryAttempt(i + 1);
+        if (delayMs > 0) await sleep(delayMs);
+        if (cancelConnectRef.current) {
+          throw new Error("Connect cancelled.");
+        }
+        try {
+          await connectRef.current();
+          refreshOrbisTabLock();
+          return;
+        } catch (caught) {
+          lastError =
+            caught instanceof Error ? caught.message : String(caught);
+          if (!isQuotaExceededError(lastError)) {
+            releaseOrbisTabLock();
+            throw caught;
+          }
+          await forceDisconnect();
+          await waitForDisconnected();
+        }
+      }
+
+      releaseOrbisTabLock();
+      throw new Error(
+        lastError ||
+          "Could not connect to Orbis after repeated retries.",
+      );
+    } finally {
+      setRetryAttempt(0);
+      setRetryTotal(0);
+    }
+  }, [forceDisconnect, getStatus, waitForDisconnected]);
+
+  useEffect(() => {
+    const onHide = () => {
+      cancelConnectRef.current = true;
+      void forceDisconnect();
+    };
+    // "visibilitychange" fires reliably and early (unlike "pagehide", whose
+    // async work can get cut off before the socket close reaches the
+    // server). Closing the socket as soon as the tab is hidden — while we
+    // are still mid-connect rather than fully streaming — is what prevents
+    // an abandoned tab/refresh from leaving a zombie session that eats the
+    // key's only slot and makes every future connect fail with the same
+    // "slot is full" error.
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") return;
+      if (statusRef.current === "connecting" || statusRef.current === "waiting") {
+        cancelConnectRef.current = true;
+        void forceDisconnect();
+      }
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+      void forceDisconnect();
+    };
+  }, [forceDisconnect]);
 
   const runAction = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -265,18 +436,15 @@ export function useOrbisSession(onDisconnected: () => void) {
   };
 
   const disconnectSession = async () => {
-    disconnecting.current = true;
-    setRunStarted(false);
-    setPaused(false);
-
-    // Remove ReactorView before closing the WebRTC tracks it is playing.
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
+    cancelConnectRef.current = true;
+    setError("");
+    setBusy(true);
     try {
-      await runAction(() => disconnect());
+      await forceDisconnect();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      disconnecting.current = false;
+      setBusy(false);
     }
   };
 
@@ -294,7 +462,9 @@ export function useOrbisSession(onDisconnected: () => void) {
     availableResolutions,
     error,
     events,
-    connectSession: () => runAction(() => connect()),
+    retryAttempt,
+    retryTotal,
+    connectSession: () => runAction(() => connectWithRetry()),
     disconnectSession,
     toggleMuted: () => setMuted((current) => !current),
     setPrompt,

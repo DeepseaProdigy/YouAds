@@ -20,10 +20,18 @@ export type AdStoreState = {
   overlayVisible: boolean;
   error: string;
   resumeFrameNote: string;
+  orbisAutoRetrying: boolean;
+  orbisRetryAttempt: number;
+  orbisRetryAt: number | null;
   setPhase: (phase: AdPhase) => void;
   setVisualElapsedMs: (ms: number) => void;
   setError: (error: string) => void;
   setResumeFrameNote: (note: string) => void;
+  setOrbisAutoRetrying: (input: {
+    retrying: boolean;
+    attempt?: number;
+    retryAt?: number | null;
+  }) => void;
   beginArming: (input: {
     videoId: string;
     resumeTimestamp: number;
@@ -61,11 +69,20 @@ export const useAdStore = create<AdStoreState>((set) => ({
   error: "",
   resumeFrameNote:
     "resume frame: extracting from stream at pause time (thumbnail fallback)",
+  orbisAutoRetrying: false,
+  orbisRetryAttempt: 0,
+  orbisRetryAt: null,
 
   setPhase: (phase) => set({ phase }),
   setVisualElapsedMs: (visualElapsedMs) => set({ visualElapsedMs }),
   setError: (error) => set({ error }),
   setResumeFrameNote: (resumeFrameNote) => set({ resumeFrameNote }),
+  setOrbisAutoRetrying: ({ retrying, attempt, retryAt }) =>
+    set({
+      orbisAutoRetrying: retrying,
+      orbisRetryAttempt: attempt ?? 0,
+      orbisRetryAt: retryAt ?? null,
+    }),
 
   beginArming: ({ videoId, resumeTimestamp }) =>
     set({

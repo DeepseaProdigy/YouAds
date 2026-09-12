@@ -109,6 +109,12 @@ input {
   border-color: #4e4a3e;
 }
 
+.disconnect-orbis {
+  color: #ffb2b2;
+  background: transparent;
+  border-color: #5a3a3a;
+}
+
 .trigger-break {
   margin-left: auto;
 }
@@ -125,6 +131,86 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+.ad-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #111113cc;
+  border: 1px solid #38352d;
+  border-radius: 12px;
+}
+
+.timestamp-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.timestamp-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  color: #bbb7ab;
+  font-size: 0.75rem;
+}
+
+.timestamp-form input {
+  min-width: 120px;
+  padding: 8px 10px;
+  color: inherit;
+  background: #171719;
+  border: 1px solid #3b3932;
+  border-radius: 8px;
+}
+
+.field-error {
+  align-self: center;
+  color: #ffb2b2;
+  font-size: 0.75rem;
+}
+
+.schedule-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  color: #ded5b8;
+  font-size: 0.78rem;
+  background: #191919cc;
+  border: 1px solid #4e4a3e;
+  border-radius: 999px;
+}
+
+.schedule-cancel {
+  color: #ded5b8;
+  background: transparent;
+  border-color: #4e4a3e;
+}
+
+.prompt-override {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+  color: #bbb7ab;
+  font-size: 0.75rem;
+}
+
+.prompt-override textarea {
+  padding: 8px 10px;
+  color: inherit;
+  background: #171719;
+  border: 1px solid #3b3932;
+  border-radius: 8px;
+  resize: vertical;
 }
 
 .watch-grid {

@@ -17,13 +17,10 @@ export function formatOrbisError(raw: string): string {
     lower.includes("quota_exceeded") ||
     lower.includes("concurrent_sessions")
   ) {
-    // This is a Reactor-account-level cap, not something the client's
-    // requested max_sessions can raise. Surface the raw reason so the
-    // real limit/count from Reactor is visible instead of a guessed number.
     return (
-      "Another Orbis session is still open on this key. " +
-      "Close every tab/window that ever connected, wait a bit, then " +
-      `Connect Orbis. (Reactor said: "${text}")`
+      "Orbis session slot is full (limit 1 on this key). Close other tabs " +
+      "using Orbis, press Disconnect here, wait a few seconds, then press " +
+      "Connect Orbis. The app will retry automatically."
     );
   }
   if (lower.includes("429")) {
