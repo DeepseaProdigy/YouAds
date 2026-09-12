@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 
+import {
+  extractYoutubeFrame,
+  fetchYoutubeThumbnail,
+} from "@/lib/ads/extract-frame";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const videoId = searchParams.get("videoId")?.trim();
@@ -10,37 +18,47 @@ export async function GET(request: Request) {
     );
   }
 
-  const candidates = [
-    `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-    `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-  ];
+  const rawT = searchParams.get("t");
+  const timestampSeconds =
+    rawT !== null && rawT !== "" ? Number(rawT) : NaN;
+  const wantExtract =
+    Number.isFinite(timestampSeconds) && timestampSeconds >= 0;
 
-  let lastError = "Could not fetch thumbnail";
-  for (const url of candidates) {
+  let source: "stream" | "thumbnail" = "thumbnail";
+  let bytes: Buffer;
+  let extractError = "";
+
+  if (wantExtract) {
     try {
-      const response = await fetch(url, { cache: "no-store" });
-      if (!response.ok) {
-        lastError = `Thumbnail HTTP ${response.status}`;
-        continue;
-      }
-      const bytes = await response.arrayBuffer();
-      // YouTube sometimes returns a tiny placeholder for missing maxres.
-      if (bytes.byteLength < 2_000) {
-        lastError = "Thumbnail too small; trying fallback";
-        continue;
-      }
-      return new NextResponse(bytes, {
-        status: 200,
-        headers: {
-          "Content-Type": "image/jpeg",
-          "Cache-Control": "no-store, max-age=0",
-        },
+      const extracted = await extractYoutubeFrame({
+        videoId,
+        timestampSeconds,
       });
+      bytes = extracted.bytes;
+      source = "stream";
     } catch (caught) {
-      lastError =
+      extractError =
         caught instanceof Error ? caught.message : String(caught);
+      console.warn(
+        "[resume-frame] stream extract failed, using thumbnail:",
+        extractError,
+      );
+      bytes = await fetchYoutubeThumbnail(videoId);
+      source = "thumbnail";
     }
+  } else {
+    bytes = await fetchYoutubeThumbnail(videoId);
   }
 
-  return NextResponse.json({ error: lastError }, { status: 502 });
+  return new NextResponse(new Uint8Array(bytes), {
+    status: 200,
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "no-store, max-age=0",
+      "X-Resume-Frame-Source": source,
+      ...(extractError
+        ? { "X-Resume-Frame-Extract-Error": extractError.slice(0, 200) }
+        : {}),
+    },
+  });
 }

@@ -19,15 +19,28 @@ async function readJson<T>(response: Response): Promise<T> {
 
 export async function fetchResumeFrameBlob(
   videoId: string,
-): Promise<Blob> {
+  timestampSeconds?: number,
+): Promise<{ blob: Blob; source: "stream" | "thumbnail" | "unknown" }> {
+  const params = new URLSearchParams({ videoId });
+  if (
+    typeof timestampSeconds === "number" &&
+    Number.isFinite(timestampSeconds)
+  ) {
+    params.set("t", String(timestampSeconds));
+  }
   const response = await fetch(
-    `/api/ads/resume-frame?videoId=${encodeURIComponent(videoId)}`,
+    `/api/ads/resume-frame?${params.toString()}`,
   );
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || "Could not fetch resume frame");
   }
-  return response.blob();
+  const header = response.headers.get("X-Resume-Frame-Source");
+  const source =
+    header === "stream" || header === "thumbnail"
+      ? header
+      : "unknown";
+  return { blob: await response.blob(), source };
 }
 
 export async function startAdSession(
@@ -39,6 +52,7 @@ export async function startAdSession(
     body: JSON.stringify(input),
   });
   const data = await readJson<StartAdResponse>(response);
+  if (data.skipped) return data;
   return {
     ...data,
     duration_seconds: data.duration_seconds ?? AD_SECONDS,
