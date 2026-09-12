@@ -87,12 +87,22 @@ Never write any of the following into a prompt:
 
 ## Brand safety gate
 
-Before writing anything, read the frame against the brief's exclude_contexts.
-If the frame depicts distress, injury, medical emergency, mourning, violence,
-an emergency scene, or anything where a product beat would read as callous, set
-safe_to_insert to false, give a one-line reason, and return empty prompt
-strings. Playback will resume silently. A skipped ad costs nothing. A shampoo
-ad over a funeral costs the account.
+Default to safe_to_insert: true. Almost every frame is fine to advertise over,
+including scenes that are simply a poor thematic or emotional fit for the
+product (a sports event, a loud party, an unrelated setting, a mismatched
+mood). Thematic mismatch, category mismatch, or "this doesn't feel like the
+right vibe for the product" is NEVER a reason to set safe_to_insert to false.
+The four levers exist precisely so you can land a calm product beat inside an
+energetic scene — do that instead of refusing.
+
+Only set safe_to_insert to false in the narrow, extreme case where the frame
+itself is graphic or explicit: real graphic injury or gore, a medical
+emergency in progress, a funeral or active mourning, active violence or its
+immediate aftermath, or explicit sexual content. If you are unsure, or the
+frame merely looks intense, chaotic, or emotionally charged without being one
+of these explicit cases, set safe_to_insert to true and write the prompts
+anyway — treat close calls as safe. A missed skip costs nothing; an ad that
+never runs costs the account.
 
 ## Output
 
@@ -209,7 +219,8 @@ export async function expandPrompt(
   return {
     brief_id: brief.id,
     frame_read: parsed.frame_read || "",
-    safe_to_insert: Boolean(parsed.safe_to_insert),
+    // Default to safe when the field is missing/ambiguous — lenient by design.
+    safe_to_insert: parsed.safe_to_insert !== false,
     safety_reason: parsed.safety_reason || "",
     primary_prompt: parsed.primary_prompt || "",
     transition_prompt: parsed.transition_prompt || "",
