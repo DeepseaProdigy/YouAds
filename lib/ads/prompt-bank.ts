@@ -1,60 +1,120 @@
 import type { AdPrompt, TargetingContext } from "@/lib/ads/types";
 
+/**
+ * Shared lock: the resume frame is the world. Product copy only adds a beat
+ * inside that world — never a new location or cinematic reboot.
+ */
+export const FRAME_CONTINUITY_LOCK =
+  "Use the attached reference image as the exact scene. Keep the same place, " +
+  "subjects, wardrobe, lighting, camera angle, and framing. Do not cut to a " +
+  "new location. Do not invent a different room, city, or landscape. Only " +
+  "add a subtle product moment that could plausibly appear in this shot. " +
+  "No logos, captions, packaging text, watermarks, or brand names on screen.";
+
+const RETURN_TO_FRAME =
+  "Remove the product beat and morph back to the attached resume frame. " +
+  "Same place, subjects, lighting, and camera. No logos, captions, or new " +
+  "focal subjects.";
+
+function productPrompt(productBeat: string): string {
+  return `${FRAME_CONTINUITY_LOCK} ${productBeat}`;
+}
+
 export const AD_PROMPT_BANK: AdPrompt[] = [
   {
-    id: "travel-neon-rain",
-    campaign_id: "demo-travel",
-    version: 1,
-    enabled: true,
-    target_rules: {
-      regions: ["US", "CA", "GB"],
-      content_categories: ["travel", "general"],
-    },
-    prompt:
-      "Cinematic 16:9 travel ad on a rain-soaked neon city sidewalk at dusk. " +
-      "A woman in a yellow raincoat walks toward camera in a medium tracking " +
-      "shot. Cool pavement reflections, gentle forward camera move, soft steam. " +
-      "No logos, captions, branding, or product packaging.",
-    transition_hint:
-      "Morph smoothly back to the paused YouTube scene with the same framing, " +
-      "subjects, and lighting. Do not add branding, captions, or a new focal " +
-      "subject.",
-  },
-  {
-    id: "outdoors-golden-hour",
-    campaign_id: "demo-outdoors",
-    version: 1,
-    enabled: true,
-    target_rules: {
-      regions: ["US"],
-      content_categories: ["outdoors", "general"],
-    },
-    prompt:
-      "Warm golden-hour outdoor lifestyle spot. Wide 16:9 shot of a quiet " +
-      "trail overlooking a valley, soft wind in tall grass, slow push-in. " +
-      "Natural light only. No logos, text overlays, or product shots.",
-    transition_hint:
-      "Transition back to the original paused video frame. Keep camera " +
-      "framing continuous. Do not invent new characters or branding.",
-  },
-  {
-    id: "kitchen-morning",
-    campaign_id: "demo-home",
+    id: "phone-flagship",
+    campaign_id: "demo-phone",
     version: 2,
     enabled: true,
     target_rules: {
-      content_categories: ["home", "general"],
+      content_categories: ["tech", "hardware", "general"],
     },
-    prompt:
-      "Quiet morning kitchen scene, 16:9, soft window light, steam rising " +
-      "from a mug on a wooden table. Slow gentle camera drift. No logos, " +
-      "packaging, or on-screen text.",
-    transition_hint:
-      "Return to the saved YouTube resume scene with matching lighting and " +
-      "composition. No new branding or captions.",
+    prompt: productPrompt(
+      "In this same scene, someone casually holds up a slim modern " +
+        "smartphone — glass back, soft edge glow — as if checking a " +
+        "message. Keep motion small and natural to the existing shot.",
+    ),
+    transition_hint: RETURN_TO_FRAME,
+  },
+  {
+    id: "shampoo-bottle",
+    campaign_id: "demo-beauty",
+    version: 2,
+    enabled: true,
+    target_rules: {
+      content_categories: ["beauty", "home", "general"],
+    },
+    prompt: productPrompt(
+      "In this same scene, a simple matte shampoo bottle rests in frame " +
+        "as if it belongs here — on a nearby surface or in someone's hand. " +
+        "Soft practical light only. Tiny natural motion, no product spin.",
+    ),
+    transition_hint: RETURN_TO_FRAME,
+  },
+  {
+    id: "houseplant",
+    campaign_id: "demo-plants",
+    version: 2,
+    enabled: true,
+    target_rules: {
+      content_categories: ["home", "outdoors", "general"],
+    },
+    prompt: productPrompt(
+      "In this same scene, a healthy potted plant becomes noticeable in " +
+        "the existing space — leaves catching the current light. Camera " +
+        "stays put; only a gentle living sway in the foliage.",
+    ),
+    transition_hint: RETURN_TO_FRAME,
+  },
+  {
+    id: "hardware-gadget",
+    campaign_id: "demo-hardware",
+    version: 2,
+    enabled: true,
+    target_rules: {
+      content_categories: ["hardware", "tech", "general"],
+    },
+    prompt: productPrompt(
+      "In this same scene, a compact hardware invention appears in someone's " +
+        "hands or on a surface already in frame — a small metal-and-plastic " +
+        "gadget with a quiet status light. Demonstrate a tiny interaction " +
+        "without leaving this shot.",
+    ),
+    transition_hint: RETURN_TO_FRAME,
+  },
+  {
+    id: "wireless-earbuds",
+    campaign_id: "demo-audio",
+    version: 2,
+    enabled: true,
+    target_rules: {
+      content_categories: ["tech", "general"],
+    },
+    prompt: productPrompt(
+      "In this same scene, a person already in frame puts in a pair of " +
+        "sleek wireless earbuds, or the open charging case sits naturally " +
+        "in the existing composition. Keep the camera locked to this world.",
+    ),
+    transition_hint: RETURN_TO_FRAME,
+  },
+  {
+    id: "smartwatch",
+    campaign_id: "demo-wearable",
+    version: 2,
+    enabled: true,
+    target_rules: {
+      content_categories: ["tech", "hardware", "general"],
+    },
+    prompt: productPrompt(
+      "In this same scene, a slim smartwatch on a wrist already in frame " +
+        "lights up softly as someone glances at it. Stay inside the reference " +
+        "image's space; no new background.",
+    ),
+    transition_hint: RETURN_TO_FRAME,
   },
 ];
 
+/** Prefer category matches; otherwise rotate among general-eligible ads. */
 export function selectAdPrompt(
   targeting: TargetingContext = {},
 ): AdPrompt | null {
@@ -64,24 +124,25 @@ export function selectAdPrompt(
   const region = targeting.region?.toUpperCase();
   const category = targeting.content_category?.toLowerCase();
 
-  const scored = enabled
-    .map((prompt) => {
-      let score = 0;
-      const { regions, content_categories } = prompt.target_rules;
-      if (region && regions?.includes(region)) score += 2;
-      if (
-        category &&
-        content_categories?.includes(category)
-      ) {
-        score += 2;
-      } else if (content_categories?.includes("general")) {
-        score += 1;
-      }
-      return { prompt, score };
-    })
-    .sort((a, b) => b.score - a.score);
+  const scored = enabled.map((prompt) => {
+    let score = 0;
+    const { regions, content_categories } = prompt.target_rules;
+    if (region && regions?.includes(region)) score += 2;
+    if (category && content_categories?.includes(category)) {
+      score += 3;
+    } else if (content_categories?.includes("general")) {
+      score += 1;
+    }
+    return { prompt, score };
+  });
 
-  return scored[0]?.prompt ?? null;
+  const best = Math.max(...scored.map((s) => s.score));
+  const top = scored.filter((s) => s.score === best).map((s) => s.prompt);
+  if (!top.length) return enabled[0] ?? null;
+
+  // Variety across breaks when several prompts tie.
+  const index = Math.floor(Math.random() * top.length);
+  return top[index] ?? top[0] ?? null;
 }
 
 export function buildTransitionPrompt(
@@ -89,7 +150,8 @@ export function buildTransitionPrompt(
   videoId: string,
 ): string {
   return (
-    `${hint} Resume continuity for YouTube video ${videoId}. ` +
-    "Hold a steady camera. Match the original scene as closely as possible."
+    `${FRAME_CONTINUITY_LOCK} ${hint} ` +
+    `Return to continuity for YouTube video ${videoId}. ` +
+    "Hold a steady camera. Match the resume frame as closely as possible."
   );
 }
