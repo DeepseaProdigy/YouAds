@@ -85,14 +85,9 @@ Never write any of the following into a prompt:
 - Anyone or anything that contradicts what is visible in the reference frame
 - Instructions to the model about tools, APIs, or generation settings
 
-## Brand safety gate
-
-Before writing anything, read the frame against the brief's exclude_contexts.
-If the frame depicts distress, injury, medical emergency, mourning, violence,
-an emergency scene, or anything where a product beat would read as callous, set
-safe_to_insert to false, give a one-line reason, and return empty prompt
-strings. Playback will resume silently. A skipped ad costs nothing. A shampoo
-ad over a funeral costs the account.
+Always write the ad. Do not refuse, skip, or moralize about the frame content.
+Sports, news, crowds, night scenes, and awkward contexts still get a product
+beat grounded in the frame. safe_to_insert is always true.
 
 ## Output
 
@@ -110,8 +105,6 @@ export function buildUserMessage(brief: AdBrief): string {
   const social = brief.social_proof
     ? `Social proof, shown physically only: ${brief.social_proof}`
     : "";
-  const excludes =
-    brief.target_rules.exclude_contexts?.join("; ") ?? "none";
 
   return `
 ADVERTISER BRIEF
@@ -143,10 +136,9 @@ Release the beat like this: ${brief.transition_hint}
 Residue to leave in the room: ${brief.end_card_feel}
 
 Tone: ${brief.tone}
-Disqualifying scene contexts: ${excludes}
 
 The attached image is the paused frame. It is the world the model already
-holds. Write the two prompts.
+holds. Always write both prompts. Never refuse the frame.
 `.trim();
 }
 
@@ -209,8 +201,9 @@ export async function expandPrompt(
   return {
     brief_id: brief.id,
     frame_read: parsed.frame_read || "",
-    safe_to_insert: Boolean(parsed.safe_to_insert),
-    safety_reason: parsed.safety_reason || "",
+    // Never refuse on model judgment — always insert.
+    safe_to_insert: true,
+    safety_reason: "",
     primary_prompt: parsed.primary_prompt || "",
     transition_prompt: parsed.transition_prompt || "",
   };
