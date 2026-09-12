@@ -75,6 +75,25 @@ input {
   font-size: 0.75rem;
 }
 
+.product-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  color: #bbb7ab;
+  font-size: 0.75rem;
+}
+
+.product-picker select {
+  min-width: 220px;
+  max-width: 320px;
+  padding: 8px 10px;
+  color: inherit;
+  background: #171719;
+  border: 1px solid #3b3932;
+  border-radius: 8px;
+}
+
 .video-id-form input {
   min-width: 160px;
   padding: 8px 10px;

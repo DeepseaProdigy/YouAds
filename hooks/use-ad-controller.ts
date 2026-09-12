@@ -24,12 +24,14 @@ type UseAdControllerArgs = {
   youtube: YouTubePlayerApi;
   orbis: OrbisSession;
   videoId: string;
+  briefId: string;
 };
 
 export function useAdController({
   youtube,
   orbis,
   videoId,
+  briefId,
 }: UseAdControllerArgs) {
   const phase = useAdStore((s) => s.phase);
   const autoBreakUsed = useAdStore((s) => s.autoBreakUsed);
@@ -196,6 +198,7 @@ export function useAdController({
           youtube_video_id: videoId,
           resume_timestamp_seconds: resumeTimestamp,
           resume_frame_base64: base64,
+          brief_id: briefId,
           targeting_context: {
             region: "US",
             content_category: "general",
@@ -249,7 +252,7 @@ export function useAdController({
         await teardownAd({ failed: true, error: message });
       }
     },
-    [autoBreakUsed, orbis, resumeYouTube, teardownAd, videoId, youtube],
+    [autoBreakUsed, briefId, orbis, resumeYouTube, teardownAd, videoId, youtube],
   );
 
   const triggerBreak = useCallback(() => {

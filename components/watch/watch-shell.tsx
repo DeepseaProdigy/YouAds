@@ -16,11 +16,14 @@ import { useOrbisSession } from "@/hooks/use-orbis-session";
 import { useYouTubePlayer } from "@/hooks/use-youtube-player";
 import { useAdStore } from "@/lib/ads/ad-store";
 import { DEFAULT_YOUTUBE_VIDEO_ID } from "@/lib/ads/constants";
+import { listProductCatalog } from "@/lib/ads/prompt-bank";
 import {
   ORBIS_MODEL_NAME,
   ORBIS_TRACKS,
   requestReactorJwt,
 } from "@/lib/orbis";
+
+const PRODUCT_CATALOG = listProductCatalog();
 
 function readVideoIdFromUrl(): string {
   if (typeof window === "undefined") {
@@ -93,10 +96,14 @@ function WatchSession({
 }) {
   const orbis = useOrbisSession(clearJwt);
   const youtube = useYouTubePlayer(videoId);
+  const [briefId, setBriefId] = useState(
+    PRODUCT_CATALOG[0]?.id ?? "",
+  );
   const { triggerBreak, skipAd, reconnectOrbis } = useAdController({
     youtube,
     orbis,
     videoId,
+    briefId,
   });
 
   const phase = useAdStore((s) => s.phase);
@@ -104,7 +111,10 @@ function WatchSession({
   const busy = phase !== "idle" && phase !== "failed";
 
   const canTrigger =
-    youtube.ready && orbis.connected && phase === "idle";
+    youtube.ready &&
+    orbis.connected &&
+    phase === "idle" &&
+    Boolean(briefId);
 
   return (
     <>
@@ -133,6 +143,20 @@ function WatchSession({
             Load
           </button>
         </form>
+        <label className="product-picker">
+          Product
+          <select
+            value={briefId}
+            disabled={busy}
+            onChange={(event) => setBriefId(event.target.value)}
+          >
+            {PRODUCT_CATALOG.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.product_label} ({item.category})
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           className="trigger-break"

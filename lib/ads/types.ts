@@ -109,6 +109,8 @@ export type StartAdRequest = {
   youtube_video_id: string;
   resume_timestamp_seconds: number;
   resume_frame_base64?: string;
+  /** Required product brief id from the catalog. */
+  brief_id?: string;
   targeting_context?: TargetingContext;
 };
 

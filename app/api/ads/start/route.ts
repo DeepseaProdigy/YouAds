@@ -111,11 +111,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const brief = selectAdPrompt(body.targeting_context);
+    const brief = selectAdPrompt(
+      body.targeting_context,
+      body.brief_id?.trim(),
+    );
     if (!brief) {
       return NextResponse.json(
-        { error: "No eligible ad brief in the bank" },
-        { status: 503 },
+        {
+          error: body.brief_id
+            ? `Unknown or disabled brief_id: ${body.brief_id}`
+            : "No eligible ad brief in the bank",
+        },
+        { status: body.brief_id ? 400 : 503 },
       );
     }
 

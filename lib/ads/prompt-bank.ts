@@ -567,9 +567,27 @@ export const briefsForCategory = (category: string) =>
       (b.target_rules.content_categories?.includes(category) ?? true),
   );
 
+/** Client-safe product picker rows. */
+export function listProductCatalog(): Array<{
+  id: string;
+  product_label: string;
+  category: string;
+}> {
+  return PROMPT_BANK.filter((b) => b.enabled).map((b) => ({
+    id: b.id,
+    product_label: b.product_label,
+    category: b.category,
+  }));
+}
+
 export function selectAdPrompt(
   targeting: TargetingContext = {},
+  briefId?: string,
 ): AdBrief | null {
+  if (briefId) {
+    return getBrief(briefId) ?? null;
+  }
+
   const enabled = PROMPT_BANK.filter((b) => b.enabled);
   if (!enabled.length) return null;
 
@@ -592,6 +610,6 @@ export function selectAdPrompt(
   const top = scored.filter((s) => s.score === best).map((s) => s.brief);
   if (!top.length) return enabled[0] ?? null;
 
-  const index = Math.floor(Math.random() * top.length);
-  return top[index] ?? top[0] ?? null;
+  // Deterministic when no brief_id: first best match, not random.
+  return top[0] ?? null;
 }
