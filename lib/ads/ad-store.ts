@@ -23,6 +23,7 @@ export type AdStoreState = {
   setPhase: (phase: AdPhase) => void;
   setVisualElapsedMs: (ms: number) => void;
   setError: (error: string) => void;
+  setResumeFrameNote: (note: string) => void;
   beginArming: (input: {
     videoId: string;
     resumeTimestamp: number;
@@ -59,11 +60,12 @@ export const useAdStore = create<AdStoreState>((set) => ({
   overlayVisible: false,
   error: "",
   resumeFrameNote:
-    "resume frame: YouTube thumbnail (iframe cannot capture)",
+    "resume frame: extracting from stream at pause time (thumbnail fallback)",
 
   setPhase: (phase) => set({ phase }),
   setVisualElapsedMs: (visualElapsedMs) => set({ visualElapsedMs }),
   setError: (error) => set({ error }),
+  setResumeFrameNote: (resumeFrameNote) => set({ resumeFrameNote }),
 
   beginArming: ({ videoId, resumeTimestamp }) =>
     set({

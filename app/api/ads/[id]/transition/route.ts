@@ -26,7 +26,7 @@ export async function POST(
   }
 
   return NextResponse.json(
-    { transition_prompt: session.transition_hint },
+    { transition_prompt: session.transition_prompt },
     { headers: { "Cache-Control": "no-store, max-age=0" } },
   );
 }

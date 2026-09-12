@@ -178,7 +178,15 @@ export function useAdController({
       if (source === "auto") store.markAutoBreakUsed();
 
       try {
-        const blob = await fetchResumeFrameBlob(videoId);
+        const { blob, source: frameSource } = await fetchResumeFrameBlob(
+          videoId,
+          resumeTimestamp,
+        );
+        store.setResumeFrameNote(
+          frameSource === "stream"
+            ? `resume frame: stream extract at ${resumeTimestamp.toFixed(1)}s`
+            : "resume frame: thumbnail fallback (stream extract failed)",
+        );
         const base64 = await blobToBase64(blob);
         const frameFile = new File([blob], "resume.jpg", {
           type: "image/jpeg",
@@ -194,11 +202,27 @@ export function useAdController({
           },
         });
 
+        if (started.skipped) {
+          store.setError(
+            started.safety_reason
+              ? `Ad skipped: ${started.safety_reason}`
+              : "Ad skipped for brand safety",
+          );
+          resumeYouTube();
+          store.markIdle();
+          finishingRef.current = false;
+          return;
+        }
+
+        if (!started.ad_session_id || !started.prompt) {
+          throw new Error("Ad start returned no session prompt");
+        }
+
         sessionIdRef.current = started.ad_session_id;
         store.setSessionMeta({
           adSessionId: started.ad_session_id,
-          promptId: started.prompt_id,
-          promptVersion: started.prompt_version,
+          promptId: started.prompt_id || "",
+          promptVersion: started.prompt_version || 0,
           approvedPrompt: started.prompt,
         });
         store.markWaitingFrame();
@@ -225,7 +249,7 @@ export function useAdController({
         await teardownAd({ failed: true, error: message });
       }
     },
-    [autoBreakUsed, orbis, teardownAd, videoId, youtube],
+    [autoBreakUsed, orbis, resumeYouTube, teardownAd, videoId, youtube],
   );
 
   const triggerBreak = useCallback(() => {
