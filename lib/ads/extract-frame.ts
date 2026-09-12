@@ -40,8 +40,29 @@ function run(
   });
 }
 
+// The bundled binary is a Python zipapp with a `#!/usr/bin/env python3`
+// shebang. yt-dlp itself requires Python 3.10+, but on macOS the Command
+// Line Tools' `/usr/bin/python3` (3.9.x) usually wins the PATH race over a
+// newer Homebrew python3.1x, so exec-ing the bundled binary directly can
+// fail even right after `npm install`. Try a few modern interpreters
+// explicitly before giving up on the bundled copy.
+const CANDIDATE_PYTHONS = [
+  "python3.13",
+  "python3.12",
+  "python3.11",
+  "python3.10",
+  "/opt/homebrew/bin/python3.13",
+  "/opt/homebrew/bin/python3.12",
+  "/opt/homebrew/bin/python3.11",
+  "/opt/homebrew/bin/python3.10",
+  "/usr/local/bin/python3.13",
+  "/usr/local/bin/python3.12",
+  "/usr/local/bin/python3.11",
+  "/usr/local/bin/python3.10",
+];
+
 async function resolveYtDlp(): Promise<Cmd> {
-  // 1) Binary shipped by `youtube-dl-exec` on npm install
+  // 1) Binary shipped by `youtube-dl-exec` on npm install, exec'd directly.
   const bundled = path.join(
     process.cwd(),
     "node_modules",
@@ -55,10 +76,22 @@ async function resolveYtDlp(): Promise<Cmd> {
       return { bin: bundled, prefixArgs: [] };
     }
   } catch {
-    // fall through
+    // fall through — likely the default `python3` on PATH is too old.
   }
 
-  // 2) System yt-dlp (brew / PATH)
+  // 2) Same bundled zipapp, but run through an explicit modern Python.
+  for (const python of CANDIDATE_PYTHONS) {
+    try {
+      const check = await run(python, [bundled, "--version"], 8_000);
+      if (check.code === 0) {
+        return { bin: python, prefixArgs: [bundled] };
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  // 3) System yt-dlp (brew / PATH)
   try {
     const check = await run("yt-dlp", ["--version"], 8_000);
     if (check.code === 0) return { bin: "yt-dlp", prefixArgs: [] };
@@ -66,7 +99,7 @@ async function resolveYtDlp(): Promise<Cmd> {
     // fall through
   }
 
-  // 3) pip module
+  // 4) pip module on whatever `python3` resolves to
   const check = await run(
     "python3",
     ["-m", "yt_dlp", "--version"],
@@ -76,7 +109,7 @@ async function resolveYtDlp(): Promise<Cmd> {
     return { bin: "python3", prefixArgs: ["-m", "yt_dlp"] };
   }
   throw new Error(
-    "yt-dlp missing — run npm install (youtube-dl-exec) or pip/brew install yt-dlp",
+    "yt-dlp missing or needs Python 3.10+ — run npm install (youtube-dl-exec) or pip/brew install yt-dlp",
   );
 }
 
