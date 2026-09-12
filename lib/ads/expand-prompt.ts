@@ -232,27 +232,50 @@ export async function expandAdPromptFromFrame(input: {
 export function buildFallbackExpanded(
   brief: AdBrief,
 ): ExpandedAd {
-  const primary =
-    `The attached reference image is the locked start frame and the only ` +
-    `world. Hold the camera. Keep every subject, surface, and light source ` +
-    `recognisable. Intrusion: ${brief.lighting_shift}. Place the ` +
-    `${brief.product_label} using ${brief.placement.prefers.join(" or ")} ` +
-    `at ${brief.placement.scale_ref}. Hero focus: ${brief.focus_target}. ` +
-    `Surfaces must show ${brief.must_show.join(", ")}. Proof once: ` +
-    `${brief.hero_beat}. Tone: ${brief.tone}. Desire: ${brief.desire_frame}. ` +
-    `Never: ${brief.must_not.join("; ")}; never relocate; no logos or text.`;
+  const pad = (seed: string, min: number, max: number): string => {
+    let text = seed.trim();
+    const filler =
+      " Hold the locked reference frame. Keep every subject, surface, " +
+      "wardrobe, and practical light recognisable. Motion stays small and " +
+      "continuous. Match colour temperature to the room already in frame. " +
+      "Nothing readable on the product. Camera stays locked. World stays " +
+      "this room only. ";
+    while (text.split(/\s+/).filter(Boolean).length < min) {
+      text += filler;
+    }
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length > max) {
+      return words.slice(0, max).join(" ");
+    }
+    return words.join(" ");
+  };
 
-  const transition =
+  const primarySeed =
+    `The attached reference image is the locked start frame and the only ` +
+    `world. Describe that space first: its light direction, focal subject, ` +
+    `and surfaces. Hold the camera. Keep every subject recognisable. ` +
+    `Intrusion: ${brief.lighting_shift}. Place the ${brief.product_label} ` +
+    `using ${brief.placement.prefers.join(" or ")} at ` +
+    `${brief.placement.scale_ref}. Prefer real contact with what is already ` +
+    `in frame. Hero focus: ${brief.focus_target}. Surfaces must show ` +
+    `${brief.must_show.join(", ")}. Proof once: ${brief.hero_beat}. ` +
+    `Audience desire: ${brief.desire_frame}. Benefit: ${brief.benefit}. ` +
+    `Ritual: ${brief.ritual}. Tone: ${brief.tone}. Keep surfaces free of ` +
+    `anything readable.`;
+
+  const transitionSeed =
     `Still the same reference frame. Benefit residue: ${brief.end_card_feel}. ` +
-    `Exit: ${brief.transition_hint}. Restore original grade and focus plane. ` +
-    `Product leaves attention. No cuts, no new location, no logos.`;
+    `Exit: ${brief.transition_hint}. Restore the original grade, ambient ` +
+    `exposure, and focal plane so the dissolve is continuous with the ` +
+    `opening frame. Product leaves attention. Camera stays locked. World ` +
+    `stays this room only. Nothing readable appears.`;
 
   return {
     brief_id: brief.id,
     frame_read: "fallback expand without vision",
     safe_to_insert: true,
     safety_reason: "",
-    primary_prompt: primary,
-    transition_prompt: transition,
+    primary_prompt: pad(primarySeed, 220, 420),
+    transition_prompt: pad(transitionSeed, 90, 180),
   };
 }

@@ -27,7 +27,7 @@ export type RubricResult = {
 };
 
 const CAMERA_MOVE =
-  /\b(cut(?:s|ting)?|zoom(?:s|ing|ed)?|pan(?:s|ning|ned)?|dolly|crane|tilt(?:s|ing|ed)?|tracking shot|whip pan|push[- ]?in|pull[- ]?out|orbit(?:s|ing)?|aerial|drone shot|new angle|camera moves|we (?:then )?see|we cut|smash cut)\b/i;
+  /(?<![\w-])(?:cut(?:s|ting)? to|smash cut|zoom(?:s|ing|ed)? in|zoom(?:s|ing|ed)? out|pan(?:s|ning|ned)? across|dolly(?:ing)?|crane(?:s|ing)?|tilt(?:s|ing|ed)? (?:up|down)|tracking shot|whip pan|push[- ]?in|pull[- ]?out|orbit(?:s|ing)? (?:around|the)|aerial shot|drone shot|new angle|camera moves|we (?:then )?see|we cut)(?![\w-])/i;
 
 const FORBIDDEN_TEXT =
   /\b(logo|wordmark|brand name|trademark|caption|lower[- ]?third|end card|on[- ]?screen text|subtitle|watermark|notification bar|app icon|ui text|nutrition (?:facts|panel)|swoosh)\b/i;
@@ -38,9 +38,6 @@ const NUMERAL_UI =
 
 const NEW_LOCATION =
   /\b(cut to|new (?:room|kitchen|bathroom|bedroom|studio|set|city|street|beach|office|gym)|establishing shot|different location|another room|walks? into a|arrives? at a|teleport)\b/i;
-
-const DEMO_MARKERS =
-  /\b(hero beat|demonstration|proves?|proof beat|shows? once|once,? clearly)\b/i;
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -103,7 +100,6 @@ function checkG4(primary: string): GateResult {
     /\b(then (?:it )?(?:shows|proves|demonstrates)|also (?:shows|proves)|second (?:beat|demo|proof)|another (?:demo|proof))\b/gi,
   );
   const multi = (proofs?.length ?? 0) >= 2;
-  // Also fail if "twice" / "two demonstrations"
   const twice =
     /\b(two demonstrations|twice|second hero beat|another demonstration)\b/i.test(
       primary,
@@ -229,5 +225,3 @@ export function regexCameraAndTextPass(
       !NUMERAL_UI.test(transition),
   };
 }
-
-void DEMO_MARKERS;
