@@ -123,6 +123,8 @@ export type StartAdResponse = {
   expanded_with?: string;
   skipped?: boolean;
   safety_reason?: string;
+  rubric_pass?: boolean;
+  rubric_failures?: string[];
 };
 
 export type TransitionAdResponse = {
