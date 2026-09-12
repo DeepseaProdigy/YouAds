@@ -127,10 +127,30 @@ export async function POST(request: Request) {
     }
 
     const framePath = await saveResumeFrame(body.resume_frame_base64);
-    const { expanded, expandedWith } = await expandBestEffort(
-      brief,
-      body.resume_frame_base64,
-    );
+
+    const overridePrompt = body.prompt_override?.trim();
+    let expanded: ExpandedAd;
+    let expandedWith: string;
+    if (overridePrompt) {
+      // Skip vision expansion entirely — the operator wrote the primary
+      // prompt by hand. Still borrow the brief's fallback transition prompt
+      // so the dissolve back to source video stays coherent.
+      const fallback = buildFallbackExpanded(brief);
+      expanded = {
+        brief_id: brief.id,
+        frame_read: "manual prompt override",
+        safe_to_insert: true,
+        safety_reason: "",
+        primary_prompt: overridePrompt,
+        transition_prompt: fallback.transition_prompt,
+      };
+      expandedWith = "manual-override";
+    } else {
+      ({ expanded, expandedWith } = await expandBestEffort(
+        brief,
+        body.resume_frame_base64,
+      ));
+    }
 
     const id = randomUUID();
     putSession({

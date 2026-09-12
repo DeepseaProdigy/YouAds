@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { OrbisSession } from "@/hooks/use-orbis-session";
 import type { YouTubePlayerApi } from "@/hooks/use-youtube-player";
@@ -19,12 +19,25 @@ import {
 } from "@/lib/ads/constants";
 import { useAdStore } from "@/lib/ads/ad-store";
 import { formatOrbisError } from "@/lib/ads/format-orbis-error";
+import {
+  isQuotaExceededError,
+  otherTabOwnsOrbisLock,
+} from "@/lib/orbis-session-lock";
+
+/** Outer rounds of the "slot is full" auto-retry, on top of the ~12 inner
+ * backoff attempts `useOrbisSession` already runs per round. Each round is
+ * spaced out further apart to outlast a stale/zombie session's server-side
+ * timeout without the user re-clicking Connect. */
+const AUTO_RETRY_MAX_ROUNDS = 6;
+const AUTO_RETRY_DELAY_MS = 20_000;
 
 type UseAdControllerArgs = {
   youtube: YouTubePlayerApi;
   orbis: OrbisSession;
   videoId: string;
   briefId: string;
+  /** Hand-written prompt that overrides the AI-expanded one when non-empty. */
+  promptOverride?: string;
 };
 
 export function useAdController({
@@ -32,6 +45,7 @@ export function useAdController({
   orbis,
   videoId,
   briefId,
+  promptOverride,
 }: UseAdControllerArgs) {
   const phase = useAdStore((s) => s.phase);
   const autoBreakUsed = useAdStore((s) => s.autoBreakUsed);
@@ -44,6 +58,10 @@ export function useAdController({
   );
   const sessionIdRef = useRef<string | null>(null);
   const resumeAtRef = useRef<number | null>(null);
+  const scheduleFiredRef = useRef(false);
+  const [scheduledBreakAt, setScheduledBreakAt] = useState<number | null>(
+    null,
+  );
 
   const clearTimers = useCallback(() => {
     if (clockRef.current !== null) {
@@ -194,6 +212,7 @@ export function useAdController({
           type: "image/jpeg",
         });
 
+        const trimmedOverride = promptOverride?.trim();
         const started = await startAdSession({
           youtube_video_id: videoId,
           resume_timestamp_seconds: resumeTimestamp,
@@ -203,6 +222,9 @@ export function useAdController({
             region: "US",
             content_category: "general",
           },
+          ...(trimmedOverride
+            ? { prompt_override: trimmedOverride }
+            : {}),
         });
 
         if (started.skipped) {
@@ -252,24 +274,65 @@ export function useAdController({
         await teardownAd({ failed: true, error: message });
       }
     },
-    [autoBreakUsed, briefId, orbis, resumeYouTube, teardownAd, videoId, youtube],
+    [
+      autoBreakUsed,
+      briefId,
+      orbis,
+      promptOverride,
+      resumeYouTube,
+      teardownAd,
+      videoId,
+      youtube,
+    ],
   );
 
   const triggerBreak = useCallback(() => {
     void beginBreak("trigger");
   }, [beginBreak]);
 
+  const scheduleBreakAt = useCallback(
+    (seconds: number | null) => {
+      if (seconds === null) {
+        scheduleFiredRef.current = false;
+        setScheduledBreakAt(null);
+        return;
+      }
+      if (!Number.isFinite(seconds) || seconds < 0) return;
+      scheduleFiredRef.current = false;
+      setScheduledBreakAt(seconds);
+      youtube.play();
+    },
+    [youtube],
+  );
+
   const warmedRef = useRef(false);
   const warmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectingRef = useRef(false);
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const autoRetryAttemptRef = useRef(0);
+
+  const clearAutoRetry = useCallback(() => {
+    if (autoRetryTimerRef.current !== null) {
+      clearTimeout(autoRetryTimerRef.current);
+      autoRetryTimerRef.current = null;
+    }
+    autoRetryAttemptRef.current = 0;
+    useAdStore.getState().setOrbisAutoRetrying({ retrying: false });
+  }, []);
 
   const connectOnce = useCallback(() => {
-    // Guard against overlapping connect() calls (e.g. the warm-up timer
-    // firing while a manual "Connect Orbis" click is already in flight).
-    // Reactor caps concurrent_sessions_per_model at 1, so a double-call
-    // from the same tab is enough to trip the same "quota exceeded" error
-    // as a truly stale session.
     if (connectingRef.current) return;
+    if (otherTabOwnsOrbisLock()) {
+      useAdStore
+        .getState()
+        .setError(
+          "Orbis is active in another browser tab. Close it or disconnect " +
+            "there first.",
+        );
+      return;
+    }
     connectingRef.current = true;
     void orbis
       .connectSession()
@@ -278,15 +341,16 @@ export function useAdController({
       });
   }, [orbis]);
 
-  // Warm Orbis once the provider reports disconnected.
   useEffect(() => {
     if (warmedRef.current) return;
     if (orbis.status !== "disconnected") return;
+    if (otherTabOwnsOrbisLock()) return;
     warmedRef.current = true;
     warmTimerRef.current = setTimeout(() => {
       warmTimerRef.current = null;
+      if (otherTabOwnsOrbisLock()) return;
       connectOnce();
-    }, 250);
+    }, 1_500);
     return () => {
       if (warmTimerRef.current !== null) {
         clearTimeout(warmTimerRef.current);
@@ -298,23 +362,71 @@ export function useAdController({
 
   const reconnectOrbis = useCallback(() => {
     useAdStore.getState().setError("");
+    clearAutoRetry();
     warmedRef.current = true;
-    // Cancel the pending auto-warm connect so a manual click can't race it
-    // into opening a second session on the same key.
     if (warmTimerRef.current !== null) {
       clearTimeout(warmTimerRef.current);
       warmTimerRef.current = null;
     }
-    connectOnce();
-  }, [connectOnce]);
+    if (connectingRef.current) return;
+    connectingRef.current = true;
+    void orbis
+      .disconnectSession()
+      .then(() => orbis.connectSession())
+      .finally(() => {
+        connectingRef.current = false;
+      });
+  }, [clearAutoRetry, orbis]);
 
-  // Surface capacity errors in the rail without auto-retry storms.
+  const disconnectOrbis = useCallback(() => {
+    useAdStore.getState().setError("");
+    clearAutoRetry();
+    if (warmTimerRef.current !== null) {
+      clearTimeout(warmTimerRef.current);
+      warmTimerRef.current = null;
+    }
+    void orbis.disconnectSession();
+  }, [clearAutoRetry, orbis]);
+
   useEffect(() => {
     if (!orbis.error) return;
     useAdStore.getState().setError(formatOrbisError(orbis.error));
   }, [orbis.error]);
 
-  // Visual 0s when Orbis reports generation_started.
+  // Once connected, drop any pending auto-retry.
+  useEffect(() => {
+    if (orbis.connected) clearAutoRetry();
+  }, [clearAutoRetry, orbis.connected]);
+
+  // "Slot is full" almost always means a stale session is still open under
+  // this key (a crashed tab, a hard refresh, /agent-lab's demo connection,
+  // etc.) that only clears once the Reactor server times it out. Instead of
+  // surfacing the same error forever and making the user keep clicking
+  // Connect, keep quietly retrying in the background for a few minutes.
+  useEffect(() => {
+    if (!orbis.error) return;
+    if (orbis.connected) return;
+    if (!isQuotaExceededError(orbis.error)) return;
+    if (connectingRef.current) return;
+    if (autoRetryTimerRef.current !== null) return;
+    if (autoRetryAttemptRef.current >= AUTO_RETRY_MAX_ROUNDS) return;
+
+    autoRetryAttemptRef.current += 1;
+    const attempt = autoRetryAttemptRef.current;
+    useAdStore.getState().setOrbisAutoRetrying({
+      retrying: true,
+      attempt,
+      retryAt: Date.now() + AUTO_RETRY_DELAY_MS,
+    });
+    autoRetryTimerRef.current = setTimeout(() => {
+      autoRetryTimerRef.current = null;
+      if (otherTabOwnsOrbisLock()) return;
+      connectOnce();
+    }, AUTO_RETRY_DELAY_MS);
+  }, [connectOnce, orbis.connected, orbis.error]);
+
+  useEffect(() => () => clearAutoRetry(), [clearAutoRetry]);
+
   useEffect(() => {
     const store = useAdStore.getState();
     if (
@@ -330,7 +442,6 @@ export function useAdController({
     }
   }, [orbis.runStarted, startClock]);
 
-  // Auto-break cue polling while idle.
   useEffect(() => {
     if (phase !== "idle" || !youtube.ready) return;
     const id = window.setInterval(() => {
@@ -344,7 +455,22 @@ export function useAdController({
     return () => window.clearInterval(id);
   }, [beginBreak, phase, youtube]);
 
-  // Fail closed on Orbis command errors during an ad.
+  // Scheduled break: fire once playback reaches the chosen timestamp.
+  useEffect(() => {
+    if (scheduledBreakAt === null) return;
+    if (phase !== "idle" || !youtube.ready) return;
+    const id = window.setInterval(() => {
+      if (scheduleFiredRef.current) return;
+      if (useAdStore.getState().phase !== "idle") return;
+      if (youtube.getCurrentTime() >= scheduledBreakAt) {
+        scheduleFiredRef.current = true;
+        setScheduledBreakAt(null);
+        void beginBreak("trigger");
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [beginBreak, phase, scheduledBreakAt, youtube]);
+
   useEffect(() => {
     if (!orbis.error) return;
     const current = useAdStore.getState().phase;
@@ -358,11 +484,6 @@ export function useAdController({
     }
   }, [orbis.error, teardownAd]);
 
-  // Unload / pagehide best-effort finish. Also tell Reactor to drop the
-  // WebRTC session explicitly — without this, a reload or tab close leaves
-  // the session "current" on Reactor's side until their own heartbeat
-  // timeout expires, which is what trips concurrent_sessions_per_model
-  // (limit=1) on the very next page load from the same tab/key.
   useEffect(() => {
     const onHide = () => {
       const id = sessionIdRef.current;
@@ -372,23 +493,22 @@ export function useAdController({
         );
         sessionIdRef.current = null;
       }
-      if (orbis.connected) {
-        void orbis.disconnectSession().catch(() => undefined);
-      }
     };
     window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
     return () => {
       window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("beforeunload", onHide);
     };
-  }, [orbis]);
+  }, []);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   return {
     triggerBreak,
+    scheduledBreakAt,
+    scheduleBreakAt,
     skipAd,
     reconnectOrbis,
+    disconnectOrbis,
+    cancelAutoRetry: clearAutoRetry,
   };
 }
