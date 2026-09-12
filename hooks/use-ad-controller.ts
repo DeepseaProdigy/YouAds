@@ -257,24 +257,53 @@ export function useAdController({
   }, [beginBreak]);
 
   const warmedRef = useRef(false);
+  const warmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectingRef = useRef(false);
+
+  const connectOnce = useCallback(() => {
+    // Guard against overlapping connect() calls (e.g. the warm-up timer
+    // firing while a manual "Connect Orbis" click is already in flight).
+    // Reactor caps concurrent_sessions_per_model at 1, so a double-call
+    // from the same tab is enough to trip the same "quota exceeded" error
+    // as a truly stale session.
+    if (connectingRef.current) return;
+    connectingRef.current = true;
+    void orbis
+      .connectSession()
+      .finally(() => {
+        connectingRef.current = false;
+      });
+  }, [orbis]);
 
   // Warm Orbis once the provider reports disconnected.
   useEffect(() => {
     if (warmedRef.current) return;
     if (orbis.status !== "disconnected") return;
     warmedRef.current = true;
-    const timer = window.setTimeout(() => {
-      void orbis.connectSession();
+    warmTimerRef.current = setTimeout(() => {
+      warmTimerRef.current = null;
+      connectOnce();
     }, 250);
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (warmTimerRef.current !== null) {
+        clearTimeout(warmTimerRef.current);
+        warmTimerRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orbis.status]);
 
   const reconnectOrbis = useCallback(() => {
     useAdStore.getState().setError("");
     warmedRef.current = true;
-    void orbis.connectSession();
-  }, [orbis]);
+    // Cancel the pending auto-warm connect so a manual click can't race it
+    // into opening a second session on the same key.
+    if (warmTimerRef.current !== null) {
+      clearTimeout(warmTimerRef.current);
+      warmTimerRef.current = null;
+    }
+    connectOnce();
+  }, [connectOnce]);
 
   // Surface capacity errors in the rail without auto-retry storms.
   useEffect(() => {
@@ -326,19 +355,31 @@ export function useAdController({
     }
   }, [orbis.error, teardownAd]);
 
-  // Unload / pagehide best-effort finish.
+  // Unload / pagehide best-effort finish. Also tell Reactor to drop the
+  // WebRTC session explicitly — without this, a reload or tab close leaves
+  // the session "current" on Reactor's side until their own heartbeat
+  // timeout expires, which is what trips concurrent_sessions_per_model
+  // (limit=1) on the very next page load from the same tab/key.
   useEffect(() => {
     const onHide = () => {
       const id = sessionIdRef.current;
-      if (!id) return;
-      void finishAdSession(id, { keepalive: true }).catch(
-        () => undefined,
-      );
-      sessionIdRef.current = null;
+      if (id) {
+        void finishAdSession(id, { keepalive: true }).catch(
+          () => undefined,
+        );
+        sessionIdRef.current = null;
+      }
+      if (orbis.connected) {
+        void orbis.disconnectSession().catch(() => undefined);
+      }
     };
     window.addEventListener("pagehide", onHide);
-    return () => window.removeEventListener("pagehide", onHide);
-  }, []);
+    window.addEventListener("beforeunload", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("beforeunload", onHide);
+    };
+  }, [orbis]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
