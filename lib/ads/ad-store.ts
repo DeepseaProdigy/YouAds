@@ -10,6 +10,7 @@ export type AdStoreState = {
   promptId: string | null;
   promptVersion: number | null;
   approvedPrompt: string | null;
+  relayUrl: string | null;
   resumeTimestamp: number | null;
   videoId: string | null;
   visualElapsedMs: number;
@@ -20,18 +21,11 @@ export type AdStoreState = {
   overlayVisible: boolean;
   error: string;
   resumeFrameNote: string;
-  orbisAutoRetrying: boolean;
-  orbisRetryAttempt: number;
-  orbisRetryAt: number | null;
   setPhase: (phase: AdPhase) => void;
   setVisualElapsedMs: (ms: number) => void;
   setError: (error: string) => void;
   setResumeFrameNote: (note: string) => void;
-  setOrbisAutoRetrying: (input: {
-    retrying: boolean;
-    attempt?: number;
-    retryAt?: number | null;
-  }) => void;
+  setRelayUrl: (url: string | null) => void;
   beginArming: (input: {
     videoId: string;
     resumeTimestamp: number;
@@ -58,6 +52,7 @@ export const useAdStore = create<AdStoreState>((set) => ({
   promptId: null,
   promptVersion: null,
   approvedPrompt: null,
+  relayUrl: null,
   resumeTimestamp: null,
   videoId: null,
   visualElapsedMs: 0,
@@ -69,20 +64,12 @@ export const useAdStore = create<AdStoreState>((set) => ({
   error: "",
   resumeFrameNote:
     "resume frame: extracting from stream at pause time (thumbnail fallback)",
-  orbisAutoRetrying: false,
-  orbisRetryAttempt: 0,
-  orbisRetryAt: null,
 
   setPhase: (phase) => set({ phase }),
   setVisualElapsedMs: (visualElapsedMs) => set({ visualElapsedMs }),
   setError: (error) => set({ error }),
   setResumeFrameNote: (resumeFrameNote) => set({ resumeFrameNote }),
-  setOrbisAutoRetrying: ({ retrying, attempt, retryAt }) =>
-    set({
-      orbisAutoRetrying: retrying,
-      orbisRetryAttempt: attempt ?? 0,
-      orbisRetryAt: retryAt ?? null,
-    }),
+  setRelayUrl: (relayUrl) => set({ relayUrl }),
 
   beginArming: ({ videoId, resumeTimestamp }) =>
     set({
@@ -97,6 +84,7 @@ export const useAdStore = create<AdStoreState>((set) => ({
       promptId: null,
       promptVersion: null,
       approvedPrompt: null,
+      relayUrl: null,
     }),
 
   setSessionMeta: ({
@@ -147,6 +135,7 @@ export const useAdStore = create<AdStoreState>((set) => ({
       overlayVisible: false,
       adSessionId: null,
       approvedPrompt: null,
+      relayUrl: null,
       visualElapsedMs: 0,
     }),
 

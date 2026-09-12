@@ -1,7 +1,7 @@
 export const AD_SECONDS = 15;
 export const TRANSITION_AT = 10;
 export const STEER_LEAD_MS = 500;
-export const FIRST_FRAME_TIMEOUT_MS = 12_000;
+export const FIRST_FRAME_TIMEOUT_MS = 60_000;
 
 /** Demo 16:9 public video. */
 export const DEFAULT_YOUTUBE_VIDEO_ID = "3fQ5FUFINdE";

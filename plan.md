@@ -1,211 +1,185 @@
-# YouTube In-Video Orbis Ad Platform
+# Backend-Owned Orbis Session Migration
 
-## Goal
+## Decision
 
-Show a 15-second generated ad inside a YouTube video. At an ad break, pause
-the source video, select an approved ad prompt, call the server-owned Orbis
-tool, and transition the final five seconds back to the source scene.
+Move all Reactor/Orbis authentication, session creation, commands, and teardown
+to the Python `orbis_service`. The browser must never create a Reactor session,
+request a Reactor JWT, or receive `REACTOR_API_KEY`.
 
-## Playback flow
-
-```text
-Pause original YouTube video at an eligible break
-  -> save the exact resume timestamp and frame
-  -> select an approved prompt from the ad-prompt bank
-  -> call Orbis tool: set_prompt + start
-  -> relay and play generated ad for 10 seconds
-  -> summarize saved resume frame
-  -> call Orbis tool: set_prompt(transition prompt)
-  -> play transition for 5 seconds
-  -> stop Orbis and resume YouTube at saved timestamp
-```
-
-The “first frame of the original video” is the frame at the resume timestamp.
-Capture and save it before starting the ad; at second 10, summarize that saved
-frame instead of extracting it then. This avoids a late transition caused by
-frame-extraction or model latency.
-
-## Architecture
+The frontend remains responsible for YouTube playback and the ad overlay. It
+calls the application API and renders frames from a backend relay only.
 
 ```text
-YouTube player integration
-  -> Ad playback controller
-  -> Ad orchestration API
-       -> approved ad-prompt bank
-       -> resume-frame store + summary service
-       -> Orbis tool
-            -> Reactor / Visko Orbis session
-            -> frame relay -> generated-ad overlay
-  -> resume original YouTube player
+Browser
+  pause YouTube + capture insertion frame
+  -> Next.js ad API
+  -> Python orbis_service
+       validate request + create Reactor session with REACTOR_API_KEY
+       set image/prompt, start and steer Orbis
+       relay generated frames
+  <- WebSocket frame relay
+Browser renders overlay, then resumes YouTube
 ```
 
-## Components
+## Why
 
-### YouTube player integration
+- `REACTOR_API_KEY` stays on the server.
+- A single service owns each Orbis lifecycle, avoiding duplicate browser
+  connections and stale sessions.
+- Failures are handled in one place and can reliably stop Reactor.
+- The frontend no longer depends on Reactor's browser SDK or `/api/token`.
 
-- Decide whether an insertion point is eligible.
-- Pause playback and store `video_id`, `resume_timestamp`, and the exact
-  `resume_frame`.
-- Present the generated ad as an overlay/replacement player.
-- Remove the overlay and resume at the stored timestamp after 15 seconds.
+## Target responsibilities
 
-### Ad-prompt bank
+### Frontend
 
-Use a closed, approved, versioned prompt bank. A model must not invent ad copy
-or alter required brand and legal wording.
+- Play, pause, and seek the embedded YouTube video.
+- At an eligible break, pause and request the resume frame.
+- Create an ad session through Next.js.
+- Ask the backend to start the Orbis stream and subscribe to its relay URL.
+- At visual second 10, call the transition endpoint.
+- At 15 seconds, skip, unload, or UI failure, call finish/stop and resume
+  YouTube at the stored timestamp.
 
-```python
-class AdPrompt:
-    id: str
-    campaign_id: str
-    prompt: str
-    target_rules: dict
-    enabled: bool
-    version: int
-```
+The browser does not import `@reactor-team/js-sdk`, use `ReactorProvider`, call
+`useOrbisSession`, or call `/api/token`.
 
-The selector returns one eligible prompt based on campaign targeting and
-delivery constraints.
+### Next.js application API
 
-### Frame-summary service
+- Validate browser requests and keep the ad-session record.
+- Store the captured resume frame temporarily and select the approved prompt.
+- Proxy start, transition, and stop requests to `orbis_service`.
+- Return only safe stream metadata such as `stream_id` and `frames_url`.
+- Never expose Reactor JWTs, keys, or control messages.
 
-At ad second 10, summarize the stored resume frame into visual facts:
+### Python `orbis_service`
 
-- subjects and screen position;
-- setting, lighting, dominant colors, and framing;
-- implied camera movement;
-- objects/text that must not be recreated or changed;
-- a concise transition prompt.
+- Read `REACTOR_API_KEY` from its own process environment.
+- Report configuration as a boolean from `/v1/health`; never return the key.
+- Create one Reactor client/session per active ad stream.
+- Apply the saved frame and approved prompt, then start Orbis.
+- Steer the existing session with the transition prompt; do not start a second
+  session.
+- Relay encoded frames over `/v1/ad-streams/{stream_id}/frames`.
+- Stop and dispose of the Reactor session on completion, error, disconnect,
+  expiry, or service shutdown.
 
-Example transition prompt:
+## API contract
 
-```text
-Transition to a rain-soaked neon city sidewalk at dusk. A woman in a yellow
-raincoat is on the left in medium tracking-shot framing. Match cool pavement
-reflections and gentle forward camera movement. Do not add branding, captions,
-or a new focal subject.
-```
+### 1. Create ad session
 
-### Orbis tool
+`POST /api/ads/start`
 
-The Orbis tool owns one persistent Reactor session per active ad. It is a
-Python function tool registered on the Main Agent and it calls Reactor itself.
+The browser sends the YouTube video ID, pause timestamp, and captured frame.
+Next.js stores the frame, selects/expands an approved prompt, and returns an
+`ad_session_id`. It does not contact Reactor.
 
-```python
-async def start_ad_stream(ad_prompt: str, resume_frame: bytes) -> StreamHandle:
-    """Connect, optionally set_image, set_prompt, start, and relay frames."""
+### 2. Start server-owned Orbis
 
-async def steer_ad_to_resume_frame(stream_id: str, transition_prompt: str) -> None:
-    """Send set_prompt on the existing Reactor session at ad second 10."""
+`POST /api/ads/{ad_session_id}/orbis/start`
 
-async def stop_ad_stream(stream_id: str) -> None:
-    """Close the Reactor session at second 15 or on failure."""
-```
-
-Start path:
-
-```text
-connect Reactor
-optional upload resume frame -> set_image
-set_prompt(approved ad prompt)
-start
-relay generated video/audio to the ad overlay
-```
-
-Transition path at second 10:
-
-```text
-summarize stored resume frame
-set_prompt(transition prompt) on the same Reactor session
-continue relay through second 15
-```
-
-Do not call `start` again for the transition. `set_prompt` steers the running
-Orbis stream at its next chunk boundary.
-
-## Timing contract
-
-| Ad time | Action |
-| --- | --- |
-| Before 0s | Pause YouTube, save frame/timestamp, select prompt, connect Orbis. |
-| 0s | Begin visible ad playback after the first playable generated frame. |
-| 0–10s | Run the selected approved ad prompt. |
-| 10s | Summarize saved resume frame and steer Orbis with `set_prompt`. |
-| 10–15s | Continue the same stream while it morphs toward source scene. |
-| 15s | Stop Orbis, remove overlay, seek/resume original video. |
-
-Schedule the internal steering call slightly before visual second 10 if runtime
-measurement shows command latency; preserve a five-second visible transition.
-
-## APIs
-
-### Start ad
-
-`POST /v1/ads/start`
+Next.js sends the stored frame and approved prompt to Python:
 
 ```json
 {
-  "youtube_video_id": "abc123",
-  "resume_timestamp_seconds": 142.8,
-  "resume_frame": "base64-encoded-image",
-  "targeting_context": { "region": "US", "content_category": "travel" }
+  "ad_prompt": "approved expanded ad prompt",
+  "resume_frame_base64": "..."
 }
 ```
 
-Response:
+Python returns:
 
 ```json
 {
-  "ad_session_id": "uuid",
   "stream_id": "uuid",
-  "duration_seconds": 15,
-  "frame_relay_url": "wss://api.example.com/v1/orbis/streams/uuid/frames"
+  "status": "starting",
+  "frames_url": "/v1/ad-streams/uuid/frames"
 }
 ```
 
-### Transition
+`frames_url` is an `orbis_service` relay URL, not a Reactor URL or credential.
 
-`POST /v1/ads/{ad_session_id}/transition`
+### 3. Steer existing stream
 
-Called by the playback controller at second 10. It uses the stored frame; the
-client does not upload it again.
+`POST /api/ads/{ad_session_id}/orbis/transition`
 
-### Finish
+At visual second 10, Next.js supplies the stored transition prompt to Python.
+Python issues `set_prompt` (or its SDK equivalent) to the existing stream. It
+must not reconnect or call `start` again.
 
-`POST /v1/ads/{ad_session_id}/finish`
+### 4. Stop
 
-Stops the Orbis session, records the outcome, and allows the client to resume
-the original video.
+`POST /api/ads/{ad_session_id}/orbis/stop`
 
-## Persistence and guardrails
+Stops the server stream. `POST /api/ads/{ad_session_id}/finish` records the
+outcome and removes the temporary frame. Both must be idempotent.
 
-- Store ad-session ID, campaign/prompt version, source timestamp, stream ID,
-  lifecycle events, display duration, and transition result.
-- Store the resume frame temporarily with a short TTL; delete it at completion.
-- Keep the Reactor API key server-side; browser receives only the frame relay.
-- Enforce one active ad session per viewer and ad break.
-- On startup, transition, relay, or player failure: stop the ad and resume
-  source playback immediately.
-- Stop streams on completion, skip, player unload, or service shutdown.
-- The MVP JPEG-frame relay should be replaced by a WebRTC relay before
-  production.
+## Migration plan
 
-## Build order
+1. Inventory and freeze browser Reactor usage.
+   - Identify `ReactorProvider`, `useOrbisSession`, `ReactorView`, direct
+     session hooks, and `/api/token` callers.
+   - Keep them out of the active watch/ad route during migration.
 
-1. Add `AdSession`, prompt-bank selection, and 15-second playback controller.
-2. Extend the Python service with start, steer, and stop ad operations.
-3. Capture and securely store the insertion-point frame and timestamp.
-4. Implement frame summarization and transition-prompt construction.
-5. Add start, transition, and finish endpoints.
-6. Connect the frontend ad overlay to the frame relay.
-7. Test successful delivery, startup failure, transition failure, unload,
-   repeated breaks, and exact 15-second teardown.
+2. Finalize Python lifecycle management.
+   - Maintain `stream_id -> Reactor client/session/task` in one manager.
+   - Implement start, transition, stop, health, frame relay, timeout, and
+     cleanup behavior.
+   - Return structured errors for missing configuration, capacity, startup
+     timeout, and command failure.
 
-## MVP acceptance criteria
+3. Make Next.js the browser-facing orchestration boundary.
+   - Keep `/api/ads/start`, `/transition`, and `/finish` as session-record APIs.
+   - Use `/api/ads/{id}/orbis/start`, `/transition`, and `/stop` as
+     server-to-server proxy routes.
+   - Persist `orbis_stream_id` after a successful start.
 
-- An approved eligible prompt is selected from the prompt bank.
-- The original YouTube video pauses and its resume frame is saved.
-- A 15-second Orbis ad begins and plays through the overlay.
-- At second 10, the same stream receives a frame-derived transition prompt.
-- At second 15, Orbis stops and the original video resumes.
-- Any ad failure falls back to uninterrupted original playback.
+4. Replace the active watch controller.
+   - Remove the `orbis` argument and browser connection/warm-up/reconnect logic
+     from `useAdController`.
+   - After `POST /api/ads/start`, call backend Orbis start.
+   - Save `frames_url` in UI state; begin the visual clock only after decoding
+     the first relayed frame.
+   - Call backend transition at 10 seconds and backend stop during teardown.
+
+5. Replace the rendered player.
+   - Replace `ReactorView`/`OrbisPlayer` with `OrbisRelayPlayer`, fed by the
+     relay WebSocket.
+   - Surface backend status/errors in telemetry and remove “Connect Orbis.”
+
+6. Remove obsolete browser credential paths.
+   - Delete `/api/token`, `requestReactorJwt`, browser session hooks, and React
+     SDK dependencies once no active route imports them.
+   - Remove `NEXT_PUBLIC_*` Reactor credential configuration. Keep only the
+     frontend-safe service URL needed to open the relay.
+
+7. Validate failure behavior.
+   - Missing server key, capacity/429, no first frame, transition failure,
+     WebSocket close, skip, page unload, and 15-second completion must release
+     the session and resume YouTube.
+
+## Environment ownership
+
+```dotenv
+# Python orbis_service process only — never NEXT_PUBLIC_
+REACTOR_API_KEY=...
+
+# Next.js server process: server-to-server base URL
+ORBIS_SERVICE_URL=http://127.0.0.1:8000
+
+# Browser-safe only if browser opens the relay WebSocket directly
+NEXT_PUBLIC_ORBIS_SERVICE_URL=http://localhost:8000
+```
+
+For local development, the shell that launches Uvicorn must load the key before
+starting Python (for example, `source ~/.zshrc`). A key set only in the Next.js
+process cannot configure `orbis_service`.
+
+## Definition of done
+
+- The active watch route has no imports from `@reactor-team/js-sdk`.
+- No browser request reaches `/api/token` or a Reactor endpoint.
+- Python is the only process that calls Reactor and holds its key.
+- A 15-second overlay starts from a stored frame, steers at 10 seconds, and
+  stops/resumes YouTube at 15 seconds.
+- Cleanup succeeds on success, skip, error, reload, and timeout.

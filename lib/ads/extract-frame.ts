@@ -114,22 +114,10 @@ async function resolveYtDlp(): Promise<Cmd> {
 }
 
 async function resolveFfmpeg(): Promise<string> {
-  const bundled = path.join(
-    process.cwd(),
-    "node_modules",
-    "ffmpeg-static",
-    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
-  );
-  try {
-    const check = await run(bundled, ["-version"], 5_000);
-    if (check.code === 0) return bundled;
-  } catch {
-    // fall through
-  }
   const check = await run("ffmpeg", ["-version"], 5_000);
   if (check.code === 0) return "ffmpeg";
   throw new Error(
-    "ffmpeg missing — run npm install (ffmpeg-static) or brew install ffmpeg",
+    "ffmpeg is not installed — run brew install ffmpeg, or the route will use its YouTube thumbnail fallback",
   );
 }
 
@@ -182,15 +170,16 @@ export async function extractYoutubeFrame(input: {
 
     const streamUrl = await getStreamUrl(ytDlp, videoUrl);
 
-    // Input seek first — better on remote streams than frame index.
+    // Seek after opening the input so ffmpeg decodes to the requested video
+    // timestamp instead of returning the nearest preceding keyframe.
     const ffmpegArgs = [
       "-hide_banner",
       "-loglevel",
       "error",
-      "-ss",
-      t.toFixed(3),
       "-i",
       streamUrl,
+      "-ss",
+      t.toFixed(3),
       "-frames:v",
       "1",
       "-q:v",

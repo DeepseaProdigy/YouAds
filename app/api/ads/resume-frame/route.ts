@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import {
   extractYoutubeFrame,
-  fetchYoutubeThumbnail,
 } from "@/lib/ads/extract-frame";
 
 export const runtime = "nodejs";
@@ -24,41 +23,29 @@ export async function GET(request: Request) {
   const wantExtract =
     Number.isFinite(timestampSeconds) && timestampSeconds >= 0;
 
-  let source: "stream" | "thumbnail" = "thumbnail";
-  let bytes: Buffer;
-  let extractError = "";
-
-  if (wantExtract) {
-    try {
-      const extracted = await extractYoutubeFrame({
-        videoId,
-        timestampSeconds,
-      });
-      bytes = extracted.bytes;
-      source = "stream";
-    } catch (caught) {
-      extractError =
-        caught instanceof Error ? caught.message : String(caught);
-      console.warn(
-        "[resume-frame] stream extract failed, using thumbnail:",
-        extractError,
-      );
-      bytes = await fetchYoutubeThumbnail(videoId);
-      source = "thumbnail";
-    }
-  } else {
-    bytes = await fetchYoutubeThumbnail(videoId);
+  if (!wantExtract) {
+    return NextResponse.json(
+      { error: "A paused-video timestamp is required to capture a resume frame" },
+      { status: 400 },
+    );
   }
 
-  return new NextResponse(new Uint8Array(bytes), {
-    status: 200,
-    headers: {
-      "Content-Type": "image/jpeg",
-      "Cache-Control": "no-store, max-age=0",
-      "X-Resume-Frame-Source": source,
-      ...(extractError
-        ? { "X-Resume-Frame-Extract-Error": extractError.slice(0, 200) }
-        : {}),
-    },
-  });
+  try {
+    const extracted = await extractYoutubeFrame({ videoId, timestampSeconds });
+    return new NextResponse(new Uint8Array(extracted.bytes), {
+      status: 200,
+      headers: {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "no-store, max-age=0",
+        "X-Resume-Frame-Source": extracted.source,
+      },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[resume-frame] exact frame extraction failed:", detail);
+    return NextResponse.json(
+      { error: `Could not capture the paused video frame: ${detail}` },
+      { status: 502 },
+    );
+  }
 }
