@@ -126,34 +126,28 @@ async function resolveFfmpeg(): Promise<string> {
   );
 }
 
-async function getStreamUrl(
+async function downloadYoutubeVideo(
   ytDlp: Cmd,
   videoUrl: string,
-): Promise<string> {
+  outputPath: string,
+): Promise<void> {
   const args = [
     ...ytDlp.prefixArgs,
     ...(allowInsecureVideoFetch ? ["--no-check-certificates"] : []),
     "-f",
     "bv*[height<=720][ext=mp4]/bv*[height<=720]/b[height<=720]/b",
-    "-g",
     "--no-playlist",
+    "--no-part",
+    "-o",
+    outputPath,
     videoUrl,
   ];
-  const result = await run(ytDlp.bin, args, 60_000);
+  const result = await run(ytDlp.bin, args, 240_000);
   if (result.code !== 0) {
     throw new Error(
-      result.stderr.trim() || "yt-dlp failed to resolve stream URL",
+      result.stderr.trim() || "yt-dlp failed to download the source video",
     );
   }
-  const lines = result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const url = lines[0];
-  if (!url?.startsWith("http")) {
-    throw new Error("yt-dlp returned no stream URL");
-  }
-  return url;
 }
 
 /**
@@ -169,12 +163,15 @@ export async function extractYoutubeFrame(input: {
 
   await mkdir(TMP_DIR, { recursive: true });
   const outPath = path.join(TMP_DIR, `${randomUUID()}.jpg`);
+  const videoPath = path.join(TMP_DIR, `${randomUUID()}.mp4`);
 
   try {
     const ytDlp = await resolveYtDlp();
     const ffmpegBin = await resolveFfmpeg();
 
-    const streamUrl = await getStreamUrl(ytDlp, videoUrl);
+    // yt-dlp handles the HTTPS request. This avoids asking FFmpeg to validate
+    // the intercepted Google certificate on local development networks.
+    await downloadYoutubeVideo(ytDlp, videoUrl, videoPath);
 
     // Seek after opening the input so ffmpeg decodes to the requested video
     // timestamp instead of returning the nearest preceding keyframe.
@@ -182,9 +179,8 @@ export async function extractYoutubeFrame(input: {
       "-hide_banner",
       "-loglevel",
       "error",
-      ...(allowInsecureVideoFetch ? ["-tls_verify", "0"] : []),
       "-i",
-      streamUrl,
+      videoPath,
       "-ss",
       t.toFixed(3),
       "-frames:v",
@@ -209,6 +205,7 @@ export async function extractYoutubeFrame(input: {
     return { bytes, source: "stream" };
   } finally {
     await unlink(outPath).catch(() => undefined);
+    await unlink(videoPath).catch(() => undefined);
   }
 }
 
