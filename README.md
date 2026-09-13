@@ -62,6 +62,10 @@ curl http://127.0.0.1:8000/v1/health
 It should report that the Reactor key is configured. It never returns the key
 itself.
 
+If a local VPN or proxy substitutes its own untrusted YouTube certificate, add
+`ALLOW_INSECURE_VIDEO_FETCH=true` to `.env.local` and restart Next.js. This is
+only a local-development workaround; use the organization CA in production.
+
 ## Ad flow
 
 1. The browser pauses YouTube and the backend uses `yt-dlp` plus `ffmpeg` to

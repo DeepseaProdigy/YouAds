@@ -7,6 +7,11 @@ const TMP_DIR = path.join(process.cwd(), "tmp", "ads", "frames");
 
 type Cmd = { bin: string; prefixArgs: string[] };
 
+// Only for a local network that intercepts HTTPS with an untrusted corporate
+// certificate. Production should install that CA instead of enabling this.
+const allowInsecureVideoFetch =
+  process.env.ALLOW_INSECURE_VIDEO_FETCH === "true";
+
 function run(
   bin: string,
   args: string[],
@@ -127,6 +132,7 @@ async function getStreamUrl(
 ): Promise<string> {
   const args = [
     ...ytDlp.prefixArgs,
+    ...(allowInsecureVideoFetch ? ["--no-check-certificates"] : []),
     "-f",
     "bv*[height<=720][ext=mp4]/bv*[height<=720]/b[height<=720]/b",
     "-g",
@@ -176,6 +182,7 @@ export async function extractYoutubeFrame(input: {
       "-hide_banner",
       "-loglevel",
       "error",
+      ...(allowInsecureVideoFetch ? ["-tls_verify", "0"] : []),
       "-i",
       streamUrl,
       "-ss",
